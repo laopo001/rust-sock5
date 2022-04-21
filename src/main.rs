@@ -18,7 +18,7 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     let (ip, port, host) = connect.resolve_up_ip_port().await?;
     let addr = connect.stream.local_addr()?;
 
-    println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
+    eprintln!("{} => {}:{} host:{}", addr, &ip, &port, &host);
     let mut real_stream = TcpStream::connect(ip + ":" + port.as_str()).await?;
     link_stream(connect.stream, real_stream).await?;
 

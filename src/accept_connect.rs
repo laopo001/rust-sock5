@@ -71,7 +71,7 @@ impl AcceptConnect {
         let attr_type = buffer[3];
         // IPv4地址 4字节长度
         if attr_type == 1 {
-            // println!("IP代理");
+            // eprintln!("IP代理");
             let ip = &buffer[4..4 + 4];
             let port_arr = &buffer[8..8 + 2];
             let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
@@ -85,7 +85,7 @@ impl AcceptConnect {
             Ok((s, port.to_string(), "".to_string()))
         } else if attr_type == 3 {
             // 域名
-            // println!("域名代理");
+            // eprintln!("域名代理");
             let len = buffer[4] as usize;
             let hostname = String::from_utf8(Vec::from(&buffer[5..(5 + len)])).unwrap();
 
