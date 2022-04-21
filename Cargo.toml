@@ -1,0 +1,15 @@
+[package]
+edition = "2021"
+name = "test-r"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# [[example]]
+# name = "main"
+# path = "example/lib.rs" 
+
+[dependencies]
+dns-lookup = "1.0.8"
+[dependencies.async-std]
+features = ["attributes","unstable"]
+version = "1.11.0"
