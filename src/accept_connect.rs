@@ -82,7 +82,7 @@ impl AcceptConnect {
 
             let s = IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])).to_string();
 
-            Ok((s, port.to_string(), "".to_string()))
+            Ok((s, port.to_string(), "ipv4".to_string()))
         } else if attr_type == 3 {
             // 域名
             // eprintln!("域名代理");
@@ -100,7 +100,17 @@ impl AcceptConnect {
             Ok((s, port.to_string(), hostname))
         } else if attr_type == 4 {
             // IPv6地址 16个字节长度
-            unimplemented!()
+            let ip = unsafe { std::mem::transmute::<&[u8], [u8; 16]>(&buffer[4..20]) };
+            let port_arr = &buffer[20..20 + 2];
+            let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+
+            let mut b = buffer.clone();
+            b[1] = 0;
+            self.stream.write(b.as_slice()).await?;
+
+            let s = IpAddr::V6(Ipv6Addr::from(ip)).to_string();
+
+            Ok((s, port.to_string(), "ipv6".to_string()))
         } else {
             unimplemented!()
         }

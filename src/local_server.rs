@@ -8,8 +8,9 @@ pub struct LocalServer {
 
 impl LocalServer {
     pub fn new(ip_port: String) -> Self {
+        let listener :Option<TcpListener> = None;
         LocalServer {
-            listener: None,
+            listener,
             ip_port,
         }
     }
