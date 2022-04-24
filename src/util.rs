@@ -53,9 +53,6 @@ pub async fn encrypt_copy(
     b: &mut &TcpStream,
     nonce_key: &[u8],
 ) -> std::io::Result<()> {
-    // let key = Key::from_slice(b"921025");
-    // let cipher = Aes256Gcm::new(key);
-    // let nonce = Nonce::from_slice(nonce_key); //
 
     loop {
         let mut buf = [0; 1024];
@@ -68,9 +65,6 @@ pub async fn encrypt_copy(
             }
             Err(e) => return Err(e),
         };
-        // let data = cipher
-        //     .encrypt(nonce, &buf[0..n])
-        //     .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
 
         let mut data = &mut buf[0..n].to_vec();
         encrypt_data(&mut data, nonce_key);
@@ -86,9 +80,6 @@ pub async fn decrypt_copy(
     b: &mut &TcpStream,
     nonce_key: &[u8],
 ) -> std::io::Result<()> {
-    // let key = Key::from_slice(b"921025");
-    // let cipher = Aes256Gcm::new(key);
-    // let nonce = Nonce::from_slice(nonce_key); //
 
     loop {
         let mut buf = [0; 1024];
@@ -102,9 +93,6 @@ pub async fn decrypt_copy(
             }
             Err(e) => return Err(e),
         };
-        // let data = cipher
-        //     .decrypt(nonce, &buf[0..n])
-        //     .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
 
         let mut data = &mut buf[0..n].to_vec();
         decrypt_data(&mut data, nonce_key);
@@ -132,12 +120,28 @@ pub fn get_publickey(buf: Vec<u8>) -> PublicKey {
 }
 
 pub fn encrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
+    // let key = Key::from_slice(b"921025");
+    // let cipher = Aes256Gcm::new(key);
+    // let nonce = Nonce::from_slice(nonce_key);
+    // let res = cipher
+    //     .encrypt(nonce, data.as_slice())
+    //     .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
+    // data.clone_from(&res);
+
     let k = nonce_key.iter().fold(0, |a, b| (a as u8).wrapping_add(*b));
     data.iter_mut().enumerate().for_each(|(i, x)| {
         *x = x.wrapping_sub(k);
     });
 }
 pub fn decrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
+    // let key = Key::from_slice(b"921025");
+    // let cipher = Aes256Gcm::new(key);
+    // let nonce = Nonce::from_slice(nonce_key);
+    // let res = cipher
+    //     .decrypt(nonce, data.as_slice())
+    //     .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
+    // data.clone_from(&res);
+
     let k = nonce_key.iter().fold(0, |a, b| (a as u8).wrapping_add(*b));
     data.iter_mut().enumerate().for_each(|(i, x)| {
         *x = x.wrapping_add(k);
