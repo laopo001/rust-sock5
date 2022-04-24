@@ -17,11 +17,9 @@ pub async fn link_stream_server(a: TcpStream, b: TcpStream, key: &[u8]) -> std::
     let (ar, aw) = &mut (&a, &a);
     let (br, bw) = &mut (&b, &b);
     // io::copy(ar, bw).race(io::copy(br, aw)).await?;
-    let key = Key::from_slice(key);
-    let cipher = Aes256Gcm::new(key);
 
-    decrypt_copy(ar, bw, &cipher)
-        .race(encrypt_copy(br, aw, &cipher))
+    decrypt_copy(ar, bw, key)
+        .race(encrypt_copy(br, aw, key))
         .await?;
     Ok(())
 }
@@ -30,11 +28,9 @@ pub async fn link_stream(a: TcpStream, b: TcpStream, key: &[u8]) -> std::io::Res
     let (ar, aw) = &mut (&a, &a);
     let (br, bw) = &mut (&b, &b);
     // io::copy(ar, bw).race(io::copy(br, aw)).await?;
-    let key = Key::from_slice(key);
-    let cipher = Aes256Gcm::new(key);
 
-    encrypt_copy(ar, bw, &cipher)
-        .race(decrypt_copy(br, aw, &cipher))
+    encrypt_copy(ar, bw, key)
+        .race(decrypt_copy(br, aw, key))
         .await?;
     Ok(())
 }
@@ -55,12 +51,14 @@ pub async fn copy(a: &mut &TcpStream, b: &mut &TcpStream) -> std::io::Result<()>
 pub async fn encrypt_copy(
     a: &mut &TcpStream,
     b: &mut &TcpStream,
-    cipher: &Aes256Gcm,
+    nonce_key: &[u8],
 ) -> std::io::Result<()> {
-    let nonce = Nonce::from_slice(b"unique nonce"); //
+    // let key = Key::from_slice(b"921025");
+    // let cipher = Aes256Gcm::new(key);
+    // let nonce = Nonce::from_slice(nonce_key); //
 
     loop {
-        let mut buf = [0; 51200];
+        let mut buf = [0; 1024];
         let n = match a.read(&mut buf).await {
             Ok(n) => {
                 if n == 0 {
@@ -70,19 +68,15 @@ pub async fn encrypt_copy(
             }
             Err(e) => return Err(e),
         };
-        let data = cipher
-            .encrypt(nonce, &buf[0..n])
-            .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
-        // let data = &buf[0..n].to_vec();
-        let n = match b.write(data.as_slice()).await {
-            Ok(n) => {
-                if n == 0 {
-                    break;
-                }
-                n
-            }
-            Err(e) => return Err(e),
-        };
+        // let data = cipher
+        //     .encrypt(nonce, &buf[0..n])
+        //     .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
+
+        let mut data = &mut buf[0..n].to_vec();
+        encrypt_data(&mut data, nonce_key);
+        if b.write_all(data.as_slice()).await.is_err() {
+            break;
+        }
     }
 
     Ok(())
@@ -90,11 +84,14 @@ pub async fn encrypt_copy(
 pub async fn decrypt_copy(
     a: &mut &TcpStream,
     b: &mut &TcpStream,
-    cipher: &Aes256Gcm,
+    nonce_key: &[u8],
 ) -> std::io::Result<()> {
-    let nonce = Nonce::from_slice(b"unique nonce"); //
+    // let key = Key::from_slice(b"921025");
+    // let cipher = Aes256Gcm::new(key);
+    // let nonce = Nonce::from_slice(nonce_key); //
+
     loop {
-        let mut buf = [0; 51200];
+        let mut buf = [0; 1024];
         // let n = a.read(&mut buf).await?;
         let n = match a.read(&mut buf).await {
             Ok(n) => {
@@ -105,20 +102,16 @@ pub async fn decrypt_copy(
             }
             Err(e) => return Err(e),
         };
-        let data = cipher
-            .decrypt(nonce, &buf[0..n])
-            .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
+        // let data = cipher
+        //     .decrypt(nonce, &buf[0..n])
+        //     .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
 
-        // let data = &buf[0..n].to_vec();
-        let n = match b.write(data.as_slice()).await {
-            Ok(n) => {
-                if n == 0 {
-                    break;
-                }
-                n
-            }
-            Err(e) => return Err(e),
-        };
+        let mut data = &mut buf[0..n].to_vec();
+        decrypt_data(&mut data, nonce_key);
+
+        if b.write_all(data.as_slice()).await.is_err() {
+            break;
+        }
     }
     Ok(())
 }
@@ -136,4 +129,17 @@ pub fn get_publickey(buf: Vec<u8>) -> PublicKey {
     let mut res = [0; 32];
     res.copy_from_slice(buf.as_slice());
     unsafe { PublicKey::from(res) }
+}
+
+pub fn encrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
+    let k = nonce_key.iter().fold(0, |a, b| (a as u8).wrapping_add(*b));
+    data.iter_mut().enumerate().for_each(|(i, x)| {
+        *x = x.wrapping_sub(k);
+    });
+}
+pub fn decrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
+    let k = nonce_key.iter().fold(0, |a, b| (a as u8).wrapping_add(*b));
+    data.iter_mut().enumerate().for_each(|(i, x)| {
+        *x = x.wrapping_add(k);
+    });
 }

@@ -17,7 +17,7 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     let mut connect = AcceptConnect::new(stream);
     connect.authenticate().await?;
 
-    let mut real_stream = TcpStream::connect("127.0.0.1:9999").await?;
+    let mut real_stream = TcpStream::connect("127.0.0.1:9998").await?;
     let (secret, public) = create_secret_public();
     // dbg!(&public.to_bytes());
     real_stream.write(&public.to_bytes()).await?;

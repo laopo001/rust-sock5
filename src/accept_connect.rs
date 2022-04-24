@@ -1,5 +1,5 @@
+use super::util::{decrypt_data, encrypt_data};
 use super::*;
-
 // https://www.ietf.org/rfc/rfc1928.txt
 // sock5 rfc1928
 pub struct AcceptConnect {
@@ -11,8 +11,11 @@ impl AcceptConnect {
         AcceptConnect { stream }
     }
     pub async fn read(&mut self) -> std::io::Result<Vec<u8>> {
-        let mut buf = [0; 5120];
+        let mut buf = [0; 1024];
         let n = self.stream.read(&mut buf).await?;
+        if n == 0 {
+            return Err(util::error("结束"));
+        }
         let res = Vec::from(&buf[0..n]);
         Ok(res)
     }
@@ -117,17 +120,14 @@ impl AcceptConnect {
     }
     pub async fn resolve_up_ip_port_decrypt(
         &mut self,
-        key: &[u8],
+        nonce_key: &[u8],
     ) -> std::io::Result<(String, String, String)> {
         use aes_gcm::aead::{Aead, NewAead};
         use aes_gcm::{Aes256Gcm, Key, Nonce}; // Or `Aes128Gcm`
-        let buffer = self.read().await?;
-        let key = Key::from_slice(key);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::from_slice(b"unique nonce");
-        let buffer = cipher
-            .decrypt(nonce, buffer.as_ref())
-            .expect("decryption failure!"); // NOTE: handle this error to avoid panics!
+        let mut buffer = self.read().await?;
+
+        decrypt_data(&mut buffer, nonce_key);
+
         if buffer[0] != 5 {
             return Err(util::error("只支持sock5"));
         }
@@ -145,8 +145,8 @@ impl AcceptConnect {
 
             let mut b = buffer.clone();
             b[1] = 0;
-            let b = cipher.encrypt(nonce, b.as_ref())
-            .expect("encryption failure!"); // NOTE: handle this error to avoid panics!
+
+            encrypt_data(&mut b, nonce_key);
 
             self.stream.write(b.as_slice()).await?;
 
@@ -164,8 +164,9 @@ impl AcceptConnect {
             let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str()).unwrap();
             let mut b = buffer.clone();
             b[1] = 0;
-            let b = cipher.encrypt(nonce, b.as_ref())
-            .expect("encryption failure!"); // NOTE: handle this error to avoid panics!
+
+            encrypt_data(&mut b, nonce_key);
+
             self.stream.write(b.as_slice()).await?;
             // connect(ip[0], port);
             let s = ip[0].to_string();
@@ -178,8 +179,9 @@ impl AcceptConnect {
 
             let mut b = buffer.clone();
             b[1] = 0;
-            let b = cipher.encrypt(nonce, b.as_ref())
-            .expect("encryption failure!"); // NOTE: handle this error to avoid panics!
+
+            encrypt_data(&mut b, nonce_key);
+
             self.stream.write(b.as_slice()).await?;
 
             let s = IpAddr::V6(Ipv6Addr::from(ip)).to_string();

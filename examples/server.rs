@@ -6,7 +6,10 @@ use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
 use test_r::accept_connect::AcceptConnect;
-use test_r::util::{create_secret_public, get_publickey, link_stream, link_stream_server};
+use test_r::util::{
+    create_secret_public, get_publickey, link_stream,
+    link_stream_server,
+};
 
 async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     let mut connect = AcceptConnect::new(stream);
@@ -37,7 +40,7 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
 }
 
 async fn app() -> std::io::Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:9999").await?;
+    let listener = TcpListener::bind("0.0.0.0:9998").await?;
     let mut incoming = listener.incoming();
 
     while let Some(stream) = incoming.next().await {
