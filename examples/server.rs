@@ -7,26 +7,34 @@ use async_std::task;
 use dns_lookup::{lookup_addr, lookup_host};
 use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use test_r::accept_connect::AcceptConnect;
-use test_r::connect::Connect;
-use test_r::util::{
-    self, alias, create_secret_public, get_publickey,
-    resolve_up_ip_port,
-};
+use test_r::connect::{Connect, CryptoProxy};
+use test_r::util::{self, alias, create_secret_public, get_publickey, resolve_up_ip_port};
 
 async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     let mut connect = Connect::new(stream);
+   
 
+    // 交换key
+    let (secret, public) = create_secret_public();
+    let remote_public = connect.read().await?;
+    connect.write(&public.to_bytes()).await?;
+    let shared_secret = secret.diffie_hellman(&get_publickey(remote_public));
+    // dbg!(&shared_secret.as_bytes());
+    connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
+ 
+ 
     let (ip, port, host) = resolve_up_ip_port(&mut connect).await?;
     let addr = connect.stream.local_addr()?;
-    eprintln!("{} => {}:{} host:{}", addr, &ip, &port, &host);
+    println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
 
     let mut real_stream = TcpStream::connect(ip + ":" + port.as_str()).await?;
     let mut real_connect = Connect::new(real_stream);
 
+    real_connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
+
     let (ar, aw) = (alias(&connect), alias(&connect));
     let (br, bw) = (alias(&real_connect), alias(&real_connect));
-    ar.copy(bw).race(br.copy(aw)).await?;
+    aw.encrypt_copy(br).race(bw.decrypt_copy(ar)).await?;
 
     Ok(())
 }

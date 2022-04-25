@@ -8,7 +8,7 @@ pub fn error(s: &str) -> std::io::Error {
     let file = file!();
     let line = line!();
     let col = column!();
-    eprintln!("error: {} --- {}:{}:{}", s, file, line, col);
+    println!("error: {} --- {}:{}:{}", s, file, line, col);
     return Error::new(ErrorKind::Other, s);
 }
 use aes_gcm::aead::{Aead, NewAead};
@@ -166,7 +166,7 @@ pub fn alias<T>(p: &T) -> &mut T {
 pub async fn resolve_up_ip_port(
     connect: &mut Connect,
 ) -> std::io::Result<(String, String, String)> {
-    let buffer = connect.read().await?;
+    let buffer = connect.decrypt_read().await?;
     if buffer[0] != 5 {
         return Err(error("只支持sock5"));
     }
@@ -184,7 +184,7 @@ pub async fn resolve_up_ip_port(
 
         let mut b = buffer.clone();
         b[1] = 0;
-        connect.write(b.as_slice()).await?;
+        connect.encrypt_write(b.as_slice()).await?;
 
         let s = IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])).to_string();
 
@@ -200,7 +200,7 @@ pub async fn resolve_up_ip_port(
         let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str()).unwrap();
         let mut b = buffer.clone();
         b[1] = 0;
-        connect.write(b.as_slice()).await?;
+        connect.encrypt_write(b.as_slice()).await?;
         // connect(ip[0], port);
         let s = ip[0].to_string();
         Ok((s, port.to_string(), hostname))
@@ -212,7 +212,7 @@ pub async fn resolve_up_ip_port(
 
         let mut b = buffer.clone();
         b[1] = 0;
-        connect.write(b.as_slice()).await?;
+        connect.encrypt_write(b.as_slice()).await?;
 
         let s = IpAddr::V6(Ipv6Addr::from(ip)).to_string();
 
