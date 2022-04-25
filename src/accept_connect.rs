@@ -14,7 +14,8 @@ impl AcceptConnect {
         let mut buf = [0; 1024];
         let n = self.stream.read(&mut buf).await?;
         if n == 0 {
-            return Err(util::error("结束"));
+            use std::io::{Error, ErrorKind};
+            return Err(Error::new(ErrorKind::Other, " return!"));
         }
         let res = Vec::from(&buf[0..n]);
         Ok(res)

@@ -13,6 +13,10 @@ dns-lookup = "1.0.8"
 x25519-dalek = "1.2.0"
 rand_core = { version = "0.5", default-features = false }
 aes-gcm = "0.9.4"
+log = "0.4"
+env_logger = "0.9.0"
+log4rs = "1.1.1"
+rust-crypto = "0.2.36"
 # rand = "0.8.5"
 # rsa = "0.6.1"
 [dependencies.async-std]

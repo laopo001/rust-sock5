@@ -1,6 +1,7 @@
 use async_std::io::{self, Read, Write};
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
+use log::{info, warn};
 use std::io::{Error, ErrorKind, Result};
 
 pub fn error(s: &str) -> std::io::Error {
@@ -53,7 +54,6 @@ pub async fn encrypt_copy(
     b: &mut &TcpStream,
     nonce_key: &[u8],
 ) -> std::io::Result<()> {
-
     loop {
         let mut buf = [0; 1024];
         let n = match a.read(&mut buf).await {
@@ -80,7 +80,6 @@ pub async fn decrypt_copy(
     b: &mut &TcpStream,
     nonce_key: &[u8],
 ) -> std::io::Result<()> {
-
     loop {
         let mut buf = [0; 1024];
         // let n = a.read(&mut buf).await?;
@@ -129,9 +128,11 @@ pub fn encrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
     // data.clone_from(&res);
 
     let k = nonce_key.iter().fold(0, |a, b| (a as u8).wrapping_add(*b));
+    info!("encrypt_data: {:?}", &data);
     data.iter_mut().enumerate().for_each(|(i, x)| {
-        *x = x.wrapping_sub(k);
+        *x = x.wrapping_sub(if i < 10 { 1 } else { 2 });
     });
+   
 }
 pub fn decrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
     // let key = Key::from_slice(b"921025");
@@ -143,7 +144,9 @@ pub fn decrypt_data(data: &mut Vec<u8>, nonce_key: &[u8]) {
     // data.clone_from(&res);
 
     let k = nonce_key.iter().fold(0, |a, b| (a as u8).wrapping_add(*b));
+    
     data.iter_mut().enumerate().for_each(|(i, x)| {
-        *x = x.wrapping_add(k);
+        *x = x.wrapping_add(if i < 10 { 1 } else { 2 });
     });
+    info!("decrypt_data: {:?}", &data);
 }

@@ -51,6 +51,7 @@ async fn app() -> std::io::Result<()> {
 }
 
 fn main() {
+    // log4rs::init_file("/home/ldh/Projects/test-r/log4rs.server.yaml", Default::default()).unwrap();
+
     task::block_on(app());
-    println!("123");
 }
