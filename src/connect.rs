@@ -7,7 +7,7 @@ use async_std::task;
 use std::io::{Error, ErrorKind};
 pub struct Connect {
     pub stream: TcpStream,
-    pub crypto: Option<Box<dyn Crypto>>,
+    pub crypto: Option<Box<dyn Crypto + Send>>,
 }
 
 impl Connect {
@@ -17,7 +17,7 @@ impl Connect {
             crypto: None,
         }
     }
-    pub fn new_with_crypto(stream: TcpStream, crypto: Box<dyn Crypto>) -> Self {
+    pub fn new_with_crypto(stream: TcpStream, crypto: Box<dyn Crypto + Send>) -> Self {
         Connect {
             stream,
             crypto: Some(crypto),
@@ -38,7 +38,7 @@ impl Connect {
     pub async fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
         return self.stream.write_all(data).await;
     }
-    pub async fn copy(&mut self, connect: &mut Connect) -> std::io::Result<()> {
+    pub async fn copy(self: &mut Connect, connect: &mut Connect) -> std::io::Result<()> {
         loop {
             let data = match connect.read().await {
                 Ok(data) => data,
