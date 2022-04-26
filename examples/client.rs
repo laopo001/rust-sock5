@@ -23,7 +23,6 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
     real_connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
 
-
     let (ar, aw) = (alias(&connect), alias(&connect));
     let (br, bw) = (alias(&real_connect), alias(&real_connect));
     aw.decrypt_copy(br).race(bw.encrypt_copy(ar)).await?;
