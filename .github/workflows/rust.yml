@@ -14,11 +14,11 @@ jobs:
       - name: install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
       - name: build x86_64-apple-darwin
-        run: cross build --target x86_64-apple-darwin
+        run: cross build  --target x86_64-apple-darwin --examples
       - name: build x86_64-pc-windows-msvc
-        run: cross build --target x86_64-pc-windows-msvc
+        run: cross build --target x86_64-pc-windows-msvc --examples
       - name: build x86_64-unknown-linux-gnu
-        run: cross build --target x86_64-unknown-linux-gnu
+        run: cross build --target x86_64-unknown-linux-gnu --examples
       - name: zip
         run: zip -q -r target.zip /target
       - name: Release
