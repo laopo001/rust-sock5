@@ -11,8 +11,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      # - name: Build server
-      #   run: cargo build --example server --verbose
+      - name: test
+        run: node -v
+      - name: test2
+        run: node build.js
       # - name: Build client
       #   run: cargo build --example client --verbose
       - name: Release
