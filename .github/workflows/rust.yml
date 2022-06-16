@@ -2,7 +2,7 @@ name: Rust
 
 on:
   push:
-    branches: ["*.*.*"]
+    branches: ["master"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,7 +19,7 @@ jobs:
       #   run: cargo build --example client --verbose
       - name: Release
         uses: softprops/action-gh-release@v1
-        # if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             README.md
