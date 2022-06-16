@@ -2,16 +2,17 @@ use async_std::io;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
+use clap::Parser;
 use dns_lookup::{lookup_addr, lookup_host};
 use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use test_r::connect::{Connect, CryptoProxy};
 use test_r::util::{self, alias, authenticate, create_secret_public, get_publickey};
 
-async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
+async fn accept(mut stream: TcpStream, args: Args) -> std::io::Result<()> {
     let mut connect = Connect::new(stream);
     authenticate(&mut connect).await?;
-    let mut realstream = TcpStream::connect("127.0.0.1:9998").await?;
+    let mut realstream = TcpStream::connect(args.server).await?;
     let mut real_connect = Connect::new(realstream);
     // 交换key
     let (secret, public) = create_secret_public();
@@ -29,18 +30,31 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn start() -> std::io::Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:7891").await?;
+async fn start(args: Args) -> std::io::Result<()> {
+    let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
     let mut incoming = listener.incoming();
 
     while let Some(stream) = incoming.next().await {
         let mut stream = stream?;
-        task::spawn(accept(stream));
+        task::spawn(accept(stream, args.clone()));
     }
     Ok(())
 }
 
+/// 客户端
+#[derive(Parser, Debug, Clone)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// 请输入服务端ip:port
+    #[clap(short, long, value_parser)]
+    server: String,
+    #[clap(short, long, value_parser, default_value_t = 1080)]
+    port: u16,
+}
+
 fn main() {
+    let args = Args::parse();
+    dbg!(&args);
     // log4rs::init_file("/home/ldh/Projects/test-r/log4rs.client.yaml", Default::default()).unwrap();
-    task::block_on(start());
+    task::block_on(start(args));
 }
