@@ -23,7 +23,8 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
 
     let (ip, port, host) = resolve_up_ip_port(&mut connect).await?;
-    let addr = connect.stream.local_addr()?;
+    let addr = connect.stream.peer_addr()?;
+
     println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
 
     let mut real_stream = TcpStream::connect(ip + ":" + port.as_str()).await?;
@@ -41,7 +42,7 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
 async fn app(args: Args) -> std::io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
     let mut incoming = listener.incoming();
-
+    
     while let Some(stream) = incoming.next().await {
         let mut stream = stream?;
         task::spawn(accept(stream));
