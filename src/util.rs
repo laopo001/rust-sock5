@@ -98,6 +98,73 @@ pub async fn resolve_up_ip_port(
     }
 }
 
+use async_tls::server::TlsStream;
+pub async fn resolve_up_ip_port2(
+    connect: &mut TlsStream<TcpStream>,
+) -> std::io::Result<(String, String, String)> {
+    let mut buffer = [0; 1024];
+    let n = connect.read(&mut buffer).await?;
+    if n == 0 {
+        return Err(Error::new(
+            ErrorKind::Other,
+            format!("error: {}  {}:{}:{}", "n == 0", file!(), line!(), column!(),),
+        ));
+    }
+    if buffer[0] != 5 {
+        return Err(error("只支持sock5"));
+    }
+    if buffer[1] == 2 {
+        return Err(error("只支持TCP UDP"));
+    }
+    let tcp = buffer[1] == 1;
+    let attr_type = buffer[3];
+    // IPv4地址 4字节长度
+    if attr_type == 1 {
+        // eprintln!("IP代理");
+        let ip = &buffer[4..4 + 4];
+        let port_arr = &buffer[8..8 + 2];
+        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+
+        let mut b = buffer.clone();
+        b[1] = 0;
+        connect.write(b.as_slice()).await?;
+
+        let s = IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])).to_string();
+
+        Ok((s, port.to_string(), "ipv4".to_string()))
+    } else if attr_type == 3 {
+        // 域名
+        // eprintln!("域名代理");
+        let len = buffer[4] as usize;
+        let hostname = String::from_utf8(Vec::from(&buffer[5..(5 + len)])).unwrap();
+
+        let port_arr = &buffer[5 + len..5 + len + 2];
+        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+        let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str()).unwrap();
+        let mut b = buffer.clone();
+        b[1] = 0;
+        connect.write(b.as_slice()).await?;
+        // connect(ip[0], port);
+        let s = ip[0].to_string();
+        Ok((s, port.to_string(), hostname))
+    } else if attr_type == 4 {
+        // IPv6地址 16个字节长度
+        let ip = unsafe { std::mem::transmute::<&[u8], [u8; 16]>(&buffer[4..20]) };
+        let port_arr = &buffer[20..20 + 2];
+        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+
+        let mut b = buffer.clone();
+        b[1] = 0;
+        connect.write(b.as_slice()).await?;
+
+        let s = IpAddr::V6(Ipv6Addr::from(ip)).to_string();
+
+        Ok((s, port.to_string(), "ipv6".to_string()))
+    } else {
+        unimplemented!()
+    }
+}
+
 
 
 pub async fn authenticate(connect: &mut Connect) -> std::io::Result<()> {

@@ -2,31 +2,46 @@ use async_std::io;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
+use async_tls::TlsConnector;
 use clap::Parser;
 use dns_lookup::{lookup_addr, lookup_host};
+use rustls::ClientConfig;
+use std::io::Cursor;
 use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use test_r::connect::{Connect, CryptoProxy};
 use test_r::util::{self, alias, authenticate, create_secret_public, get_publickey};
 
 async fn accept(mut stream: TcpStream, args: Args) -> std::io::Result<()> {
     let mut connect = Connect::new(stream);
     authenticate(&mut connect).await?;
-    let mut realstream = TcpStream::connect(args.server).await?;
-    let mut real_connect = Connect::new(realstream);
-    // 交换key
-    let (secret, public) = create_secret_public();
-    real_connect.write(&public.to_bytes()).await?;
-    let remote_public = real_connect.read().await?;
+    let cafile = &args.cafile;
+    let connector = if let Some(cafile) = cafile {
+        connector_for_ca_file(cafile).await?
+    } else {
+        TlsConnector::default()
+    };
+    let tcp_stream = TcpStream::connect(&args.server).await?;
 
-    let shared_secret = secret.diffie_hellman(&get_publickey(remote_public));
-    // dbg!(&shared_secret.as_bytes());
-    connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
-    real_connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
+    // Use the connector to start the handshake process.
+    // This consumes the TCP stream to ensure you are not reusing it.
+    // Awaiting the handshake gives you an encrypted
+    // stream back which you can use like any other.
+    let mut tls_stream = connector.connect(&args.server, tcp_stream).await?;
 
-    let (ar, aw) = (alias(&connect), alias(&connect));
-    let (br, bw) = (alias(&real_connect), alias(&real_connect));
-    aw.decrypt_copy(br).race(bw.encrypt_copy(ar)).await?;
+    let connector = if let Some(cafile) = cafile {
+        connector_for_ca_file(cafile).await?
+    } else {
+        TlsConnector::default()
+    };
+
+
+    let (ar, aw) = (alias(&connect.stream), alias(&connect.stream));
+    let (br, bw) = (alias(&tls_stream), alias(&tls_stream));
+    io::copy(aw, br).race(io::copy(bw, ar)).await?;
+
     Ok(())
 }
 
@@ -50,6 +65,9 @@ struct Args {
     server: String,
     #[clap(short, long, value_parser, default_value_t = 1080)]
     port: u16,
+    /// 请输入端口
+    #[clap(short, long, value_parser)]
+    cafile: Option<PathBuf>,
 }
 
 fn main() {
@@ -57,4 +75,15 @@ fn main() {
     dbg!(&args);
     // log4rs::init_file("/home/ldh/Projects/test-r/log4rs.client.yaml", Default::default()).unwrap();
     task::block_on(start(args));
+}
+
+async fn connector_for_ca_file(cafile: &Path) -> io::Result<TlsConnector> {
+    let mut config = ClientConfig::new();
+    let file = async_std::fs::read(cafile).await?;
+    let mut pem = Cursor::new(file);
+    config
+        .root_store
+        .add_pem_file(&mut pem)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))?;
+    Ok(TlsConnector::from(Arc::new(config)))
 }
