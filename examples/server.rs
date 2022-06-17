@@ -10,7 +10,7 @@ use dns_lookup::{lookup_addr, lookup_host};
 use rustls::internal::pemfile::{certs, rsa_private_keys};
 use rustls::{Certificate, NoClientAuth, PrivateKey, ServerConfig};
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
@@ -25,6 +25,7 @@ fn load_certs(path: &Path) -> io::Result<Vec<Certificate>> {
 
 /// Load the passed keys file
 fn load_keys(path: &Path) -> io::Result<Vec<PrivateKey>> {
+
     rsa_private_keys(&mut BufReader::new(File::open(path)?))
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))
 }
@@ -46,8 +47,6 @@ fn load_config(options: &Args) -> io::Result<ServerConfig> {
 
     Ok(config)
 }
-
-
 
 async fn accept(mut stream: TcpStream, acceptor: TlsAcceptor) -> std::io::Result<()> {
     let addr = stream.peer_addr()?;
