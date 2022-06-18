@@ -6,12 +6,13 @@ use async_std::prelude::*;
 use async_std::task;
 use clap::Parser;
 use dns_lookup::{lookup_addr, lookup_host};
+use std::f32::consts::E;
 use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use test_r::connect::{Connect, CryptoProxy};
 use test_r::util::{self, alias, create_secret_public, get_publickey, resolve_up_ip_port};
 
-async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
+async fn accept(mut stream: TcpStream, args: Args) -> std::io::Result<()> {
     let mut connect = Connect::new(stream);
 
     // 交换key
@@ -22,8 +23,19 @@ async fn accept(mut stream: TcpStream) -> std::io::Result<()> {
     // dbg!(&shared_secret.as_bytes());
     connect.set_crypto(Box::new(CryptoProxy::new(shared_secret.as_bytes())));
 
+    let client_token_vec = connect.decrypt_read().await?;
+    let client_token = String::from_utf8(client_token_vec).unwrap();
+    let server_token = args.token;
+    if client_token == server_token {
+        connect.encrypt_write(&[1]).await?;
+    } else {
+        connect.encrypt_write(&[0]).await?;
+        return Ok((()));
+    }
+
     let (ip, port, host) = resolve_up_ip_port(&mut connect).await?;
-    let addr = connect.stream.local_addr()?;
+    let addr = connect.stream.peer_addr()?;
+
     println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
 
     let mut real_stream = TcpStream::connect(ip + ":" + port.as_str()).await?;
@@ -44,18 +56,21 @@ async fn app(args: Args) -> std::io::Result<()> {
 
     while let Some(stream) = incoming.next().await {
         let mut stream = stream?;
-        task::spawn(accept(stream));
+        task::spawn(accept(stream, args.clone()));
     }
     Ok(())
 }
 
 /// 服务端
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// 请输入端口
     #[clap(short, long, value_parser, default_value_t = 8877)]
     port: u16,
+    /// 请输入token
+    #[clap(short, long, value_parser, default_value = "123456")]
+    token: String,
 }
 
 fn main() {
