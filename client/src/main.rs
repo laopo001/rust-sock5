@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
     let url = Url::parse("https://localhost:12345/Cargo.toml")?;
-    let remote = (url.host_str().unwrap(), url.port().unwrap_or(12345))
+    let remote = ("127.0.0.1", url.port().unwrap_or(12345))
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;

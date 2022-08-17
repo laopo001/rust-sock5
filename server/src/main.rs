@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
     let certs = certificate::load_certificates("../certificate/cer")?;
     let key = certificate::load_private_key("../certificate/key")?;
-    let listen = "[::1]:12345".to_socket_addrs()?.next().unwrap();
+    let listen = "127.0.0.1:12345".to_socket_addrs()?.next().unwrap();
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
