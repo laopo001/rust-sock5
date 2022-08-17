@@ -10,6 +10,31 @@ use std::{
 use tracing::{error, info};
 use url::Url;
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
+
+
+struct SkipServerVerification;
+
+impl SkipServerVerification {
+    fn new() -> Arc<Self> {
+        Arc::new(Self)
+    }
+}
+
+impl rustls::client::ServerCertVerifier for SkipServerVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::Certificate,
+        _intermediates: &[rustls::Certificate],
+        _server_name: &rustls::ServerName,
+        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _ocsp_response: &[u8],
+        _now: std::time::SystemTime,
+    ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::ServerCertVerified::assertion())
+    }
+}
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(
@@ -34,7 +59,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
     endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
-    // endpoint.set_default_client_config(quinn::ClientConfig::with_native_roots());
+
+
+    // let mut client_crypto = rustls::ClientConfig::builder()
+    //     .with_safe_defaults()
+    //     .with_custom_certificate_verifier(SkipServerVerification::new())
+    //     .with_no_client_auth();
+    // client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
+
+    // let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
+    // endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
+
+
 
     let request = format!("GET {}\r\n", url.path());
 
