@@ -6,7 +6,6 @@ use std::{
 };
 
 pub fn load_certificates(path: &str) -> Result<Vec<Certificate>, IoError> {
-    dbg!(&path);
     let mut file = BufReader::new(File::open(path)?);
     let mut certs = Vec::new();
 

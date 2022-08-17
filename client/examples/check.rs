@@ -18,23 +18,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .finish(),
     )
     .unwrap();
-    let url = Url::parse("https://localhost:12345/Cargo.toml")?;
-    let remote = (url.host_str().unwrap(), url.port().unwrap_or(12345))
+    let url = Url::parse("https://geekflare.com/tools/http3-test")?;
+    let remote = (url.host_str().unwrap(), url.port().unwrap_or(443))
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;
 
-    let mut roots = rustls::RootCertStore::empty();
-    roots.add(&rustls::Certificate(fs::read(&"../certificate/cer")?))?;
-    let mut client_crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
+    // let mut roots = rustls::RootCertStore::empty();
+    // roots.add(&rustls::Certificate(fs::read(&"../certificate/cer")?))?;
+    // let mut client_crypto = rustls::ClientConfig::builder()
+    //     .with_safe_defaults()
+    //     .with_root_certificates(roots)
+    //     .with_no_client_auth();
+    // client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
+
+    
     let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
-    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
-    // endpoint.set_default_client_config(quinn::ClientConfig::with_native_roots());
+    // endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
+    endpoint.set_default_client_config(quinn::ClientConfig::with_native_roots());
 
     let request = format!("GET {}\r\n", url.path());
 

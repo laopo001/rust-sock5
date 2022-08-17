@@ -11,3 +11,9 @@ rustls = { version = "0.20.6", features = ["quic"], default-features = false }
 rustls-pemfile = "1.0.*"
 quinn = "0.8.*"
 futures-util = { version = "0.3.*", default-features = false }
+tracing = "0.1.10"
+anyhow = "1.0.22"
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+tracing-futures = { version = "0.2.0", default-features = false, features = ["std-future"] }
+
+[dev-dependencies]

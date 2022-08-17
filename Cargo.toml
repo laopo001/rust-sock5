@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "client",
-    "server"
+    "server",
+    "certificate"
 ]
 
 [profile.release]
