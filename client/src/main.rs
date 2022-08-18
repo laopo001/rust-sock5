@@ -53,14 +53,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = create_conn().await.unwrap();
     loop {
         let (mut socket, _) = listener.accept().await?;
-        let mut splitStream = conn
+        // let mut splitStream = conn
+        //     .open_bi()
+        //     .await
+        //     .map_err(|e| anyhow!("failed to open stream: {}", e))?;
+
+        match conn
             .open_bi()
             .await
-            .map_err(|e| anyhow!("failed to open stream: {}", e))?;
-        tokio::spawn(async move {
-            authenticate(&mut socket).await.unwrap();
-            create_stream(&mut splitStream, &mut socket).await.unwrap();
-        });
+            .map_err(|e| anyhow!("failed to open stream: {}", e))
+        {
+            Ok(mut splitStream) => {
+                tokio::spawn(async move {
+                    authenticate(&mut socket).await.unwrap();
+                    create_stream(&mut splitStream, &mut socket).await.unwrap();
+                });
+            }
+            Err(err) => {
+                error!("error: {}, 重新创建连接", err);
+                conn = create_conn().await.unwrap();
+                let mut splitStream = conn
+                    .open_bi()
+                    .await
+                    .map_err(|e| anyhow!("failed to open stream: {}", e))?;
+                tokio::spawn(async move {
+                    authenticate(&mut socket).await.unwrap();
+                    create_stream(&mut splitStream, &mut socket).await.unwrap();
+                });   
+            }
+        }
     }
 
     Ok(())
@@ -116,7 +137,16 @@ async fn create_conn() -> Result<Connection> {
     client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
     let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
-    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
+    let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
+
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(10000);
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config
+        .max_idle_timeout(Some(IDLE_TIMEOUT.try_into().unwrap()))
+        .keep_alive_interval(Some(Duration::from_millis(100)));
+    client_config.transport = Arc::new(transport_config);
+
+    endpoint.set_default_client_config(client_config);
 
     let start = Instant::now();
     let host = "localhost";

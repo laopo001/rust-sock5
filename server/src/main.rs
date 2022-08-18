@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let fut = handle_connection(conn);
         tokio::spawn(async move {
             if let Err(e) = fut.await {
-                error!("connection failed: {reason}", reason = e.to_string())
+                error!("connection failed: handle_connection {reason}", reason = e.to_string())
             }
         });
     }
@@ -98,7 +98,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             tokio::spawn(
                 async move {
                     let (ip, port, host) = resolve_up_ip_port(&mut stream).await.expect("解析ip失败");
-                    info!("{} => {}:{} ip_type:{}", addr, &ip, &port, &host);
+                    info!("remote: {}:{} host:{}",  &ip, &port, &host);
                     let mut real_stream =
                         TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
 
@@ -114,36 +114,11 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
     Ok(())
 }
 
-// async fn handle_request((mut send,mut recv): (quinn::SendStream, quinn::RecvStream)) -> Result<()> {
-//     let req = recv
-//         .read_to_end(64 * 1024)
-//         .await
-//         .map_err(|e| anyhow!("failed reading request: {}", e))?;
-//     let mut escaped = String::new();
-//     for &x in &req[..] {
-//         let part = ascii::escape_default(x).collect::<Vec<_>>();
-//         escaped.push_str(str::from_utf8(&part).unwrap());
-//     }
-//     // dbg!(&escaped);
-//     info!(content = %escaped);
-//     let resp = b"hello world\n".to_vec();
-//     // Write the response
-//     send.write_all(&resp)
-//         .await
-//         .map_err(|e| anyhow!("failed to send response: {}", e))?;
-//     // Gracefully terminate the stream
-//     send.finish()
-//         .await
-//         .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
-//     info!("complete");
-//     Ok(())
-// }
-
 pub async fn resolve_up_ip_port(
     (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
 ) -> Result<(String, String, String)> {
     let mut buf = [0; 1024];
-    let n = recv.read(&mut buf[..]).await?.expect("tes");
+    let n = recv.read(&mut buf[..]).await?.expect("test");
     let buffer = buf[0..n].to_vec();
     if buffer[0] != 5 {
         return Err(anyhow!("只支持sock5"));
@@ -205,11 +180,6 @@ pub async fn copy(
     (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(real_stream);
-
-    // let mut buf = [0; 1024];
-    // let n = recv.read(&mut buf[..]).await?.expect("tes");
-    // let buffer = buf[0..n].to_vec();
-    // info!("{}", String::from_utf8(buffer).unwrap());
 
     tokio::select! {
        Ok(_) = tokio::io::copy(recv, &mut w) => {},
