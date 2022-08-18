@@ -10,7 +10,8 @@ use std::{
 use tracing::{error, info};
 use url::Url;
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
-
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 struct SkipServerVerification;
 
@@ -34,21 +35,75 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
     }
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive(tracing_subscriber::filter::LevelFilter::DEBUG.into()),
+            )
             .finish(),
     )
     .unwrap();
-    let url = Url::parse("https://localhost:12345/Cargo.toml")?;
-    let remote = ("127.0.0.1", url.port().unwrap_or(12345))
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| anyhow!("couldn't resolve to an address"))?;
 
+    let listener = TcpListener::bind("0.0.0.0:1080").await?;
+
+    loop {
+        let (mut socket, _) = listener.accept().await?;
+
+        tokio::spawn(async move {
+            authenticate(&mut socket).await.unwrap();
+            create_conn(&mut socket).await.unwrap();
+        });
+    }
+
+    Ok(())
+}
+
+fn duration_secs(x: &Duration) -> f32 {
+    x.as_secs() as f32 + x.subsec_nanos() as f32 * 1e-9
+}
+
+async fn authenticate(stream: &mut TcpStream) -> Result<()> {
+    let mut buffer = [0; 128];
+    let n = stream.read(&mut buffer[..]).await?;
+    if buffer[0] != 5 {
+        return Err(anyhow!("只支持sock5"));
+    }
+    let methods = buffer[2..n].to_vec();
+    if methods.contains(&0) {
+        stream.write(&[5, 0]).await?;
+        return Ok(());
+    } else if methods.contains(&2) {
+        stream.write(&[5, 2]).await?;
+        let mut buffer = [0; 1024];
+        let n = stream.read(&mut buffer[..]).await?;
+        if buffer[0] != 1 {
+            return Err(anyhow!("子协商的当前版本是1"));
+        }
+        let ulen = buffer[1] as usize;
+        let username = String::from_utf8(buffer[2..2 + ulen].into()).unwrap();
+
+        let plen = buffer[2 + ulen] as usize;
+        let pstart = 2 + ulen + 1;
+        let password = String::from_utf8(buffer[pstart..pstart + plen].into()).unwrap();
+        info!("username:{},password:{}", &username, &password);
+        if username == "admin" && password == "123456" {
+            stream.write(&[1, 0]).await?;
+        } else {
+            stream.write(&[1, 1]).await?;
+            return Err(anyhow!("密码错误"));
+        }
+        return Ok(());
+    } else {
+        return Err(anyhow!("不支持的验证"));
+    }
+}
+
+async fn create_conn(origin_stream: &mut TcpStream) -> Result<()> {
+    let (mut r, mut w) = tokio::io::split(origin_stream);
     let mut roots = rustls::RootCertStore::empty();
     roots.add(&rustls::Certificate(fs::read(&"../certificate/cer")?))?;
     let mut client_crypto = rustls::ClientConfig::builder()
@@ -60,72 +115,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
     endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
 
-
-    // let mut client_crypto = rustls::ClientConfig::builder()
-    //     .with_safe_defaults()
-    //     .with_custom_certificate_verifier(SkipServerVerification::new())
-    //     .with_no_client_auth();
-    // client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
-
-    // let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
-    // endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(client_crypto)));
-
-
-
-    let request = format!("GET {}\r\n", url.path());
-
     let start = Instant::now();
-    let rebind = false;
-    let host = url.host_str().unwrap();
-    eprintln!("get {}, host {}", url.path(), host);
-    eprintln!("connecting to {} at {}", host, remote);
+    let host = "localhost";
+    let remote = "127.0.0.1:12345".parse()?;
+    info!("connecting to {} at {}", host, remote);
     let new_conn = endpoint
         .connect(remote, host)?
         .await
         .map_err(|e| anyhow!("failed to connect: {}", e))?;
-    eprintln!("connected at {:?}", start.elapsed());
+    info!("connected at {:?}", start.elapsed());
     let quinn::NewConnection {
         connection: conn, ..
     } = new_conn;
-    let (mut send, recv) = conn
+    let (mut send, mut recv) = conn
         .open_bi()
         .await
         .map_err(|e| anyhow!("failed to open stream: {}", e))?;
-    if rebind {
-        let socket = std::net::UdpSocket::bind("[::]:0").unwrap();
-        let addr = socket.local_addr().unwrap();
-        eprintln!("rebinding to {}", addr);
-        endpoint.rebind(socket).expect("rebind failed");
+
+    tokio::select! {
+       _ = tokio::io::copy(&mut r, &mut send) => {},
+       _ = tokio::io::copy(&mut recv, &mut w) => {},
     }
-
-    send.write_all(request.as_bytes())
-        .await
-        .map_err(|e| anyhow!("failed to send request: {}", e))?;
-    send.finish()
-        .await
-        .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
-    let response_start = Instant::now();
-    eprintln!("request sent at {:?}", response_start - start);
-    let resp = recv
-        .read_to_end(usize::max_value())
-        .await
-        .map_err(|e| anyhow!("failed to read response: {}", e))?;
-    let duration = response_start.elapsed();
-    eprintln!(
-        "response received in {:?} - {} KiB/s",
-        duration,
-        resp.len() as f32 / (duration_secs(&duration) * 1024.0)
-    );
-    io::stdout().write_all(&resp).unwrap();
-    io::stdout().flush().unwrap();
-    conn.close(0u32.into(), b"done");
-
-    // Give the server a fair chance to receive the close packet
-    endpoint.wait_idle().await;
-
-    Ok(())
-}
-
-fn duration_secs(x: &Duration) -> f32 {
-    x.as_secs() as f32 + x.subsec_nanos() as f32 * 1e-9
+    // tokio::io::copy(&mut r, &mut send);
+    // tokio::io::copy(recv, w);
+    return Ok(());
 }

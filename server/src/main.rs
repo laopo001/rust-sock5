@@ -1,6 +1,8 @@
 use futures_util::stream::StreamExt;
 use std::net::ToSocketAddrs;
 mod certificate;
+use anyhow::{anyhow, bail, Context, Result};
+use quinn::{Endpoint, EndpointConfig, Incoming, ServerConfig};
 use std::{
     ascii, fs, io,
     net::SocketAddr,
@@ -8,8 +10,6 @@ use std::{
     str,
     sync::Arc,
 };
-use anyhow::{anyhow, bail, Context, Result};
-use quinn::{Endpoint, EndpointConfig, Incoming, ServerConfig};
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
 
@@ -19,7 +19,11 @@ pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive(tracing_subscriber::filter::LevelFilter::DEBUG.into()),
+            )
             .finish(),
     )
     .unwrap();
@@ -36,15 +40,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap()
         .max_concurrent_uni_streams(0_u8.into());
 
-
     let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, listen)?;
     eprintln!("listening on {}", endpoint.local_addr()?);
 
     while let Some(conn) = incoming.next().await {
-        // dbg!("accepted!");
-        // dbg!(conn.remote_address());
         info!("connection incoming");
-        let fut = handle_connection( conn);
+        let fut = handle_connection(conn);
         tokio::spawn(async move {
             if let Err(e) = fut.await {
                 error!("connection failed: {reason}", reason = e.to_string())
@@ -103,11 +104,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
     Ok(())
 }
 
-
-
-async fn handle_request(
-    (mut send, recv): (quinn::SendStream, quinn::RecvStream),
-) -> Result<()> {
+async fn handle_request((mut send, recv): (quinn::SendStream, quinn::RecvStream)) -> Result<()> {
     let req = recv
         .read_to_end(64 * 1024)
         .await
@@ -117,6 +114,7 @@ async fn handle_request(
         let part = ascii::escape_default(x).collect::<Vec<_>>();
         escaped.push_str(str::from_utf8(&part).unwrap());
     }
+    // dbg!(&escaped);
     info!(content = %escaped);
     let resp = b"hello world\n".to_vec();
     // Write the response
@@ -130,3 +128,5 @@ async fn handle_request(
     info!("complete");
     Ok(())
 }
+
+
