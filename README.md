@@ -2,6 +2,7 @@
 
 quic
 
-```   tcp           udp(quic)             tcp 
+```   
+       tcp           udp(quic)             tcp 
 sock5 <-> localhost ==========> -> server <-> target
 ```
