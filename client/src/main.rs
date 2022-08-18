@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use quinn::{Connection, NewConnection};
 use std::{
     fs,
     io::{self, Write},
@@ -49,13 +50,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     let listener = TcpListener::bind("0.0.0.0:1080").await?;
-
+    let mut conn = create_conn().await.unwrap();
     loop {
         let (mut socket, _) = listener.accept().await?;
-
+        let mut splitStream = conn
+            .open_bi()
+            .await
+            .map_err(|e| anyhow!("failed to open stream: {}", e))?;
         tokio::spawn(async move {
             authenticate(&mut socket).await.unwrap();
-            create_conn(&mut socket).await.unwrap();
+            create_stream(&mut splitStream, &mut socket).await.unwrap();
         });
     }
 
@@ -102,8 +106,7 @@ async fn authenticate(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-async fn create_conn(origin_stream: &mut TcpStream) -> Result<()> {
-    let (mut r, mut w) = tokio::io::split(origin_stream);
+async fn create_conn() -> Result<Connection> {
     let mut roots = rustls::RootCertStore::empty();
     roots.add(&rustls::Certificate(fs::read(&"../certificate/cer")?))?;
     let mut client_crypto = rustls::ClientConfig::builder()
@@ -127,15 +130,18 @@ async fn create_conn(origin_stream: &mut TcpStream) -> Result<()> {
     let quinn::NewConnection {
         connection: conn, ..
     } = new_conn;
-    
-    let (mut send, mut recv) = conn
-        .open_bi()
-        .await
-        .map_err(|e| anyhow!("failed to open stream: {}", e))?;
 
+    return Ok(conn);
+}
+
+async fn create_stream(
+    (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
+    origin_stream: &mut TcpStream,
+) -> Result<()> {
+    let (mut r, mut w) = tokio::io::split(origin_stream);
     tokio::select! {
-       Ok(_) = tokio::io::copy(&mut r, &mut send) => {},
-       Ok(_) = tokio::io::copy(&mut recv, &mut w) => {},
+        Ok(_) = tokio::io::copy(recv, &mut w) => {},
+        Ok(_) = tokio::io::copy(&mut r,  send) => {}
     }
     // tokio::io::copy(&mut r, &mut send);
     // tokio::io::copy(recv, w);

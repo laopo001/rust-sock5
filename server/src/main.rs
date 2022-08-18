@@ -97,7 +97,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
 
             tokio::spawn(
                 async move {
-                    let (ip, port, host) = resolve_up_ip_port(&mut stream).await.expect("error");
+                    let (ip, port, host) = resolve_up_ip_port(&mut stream).await.expect("解析ip失败");
                     info!("{} => {}:{} ip_type:{}", addr, &ip, &port, &host);
                     let mut real_stream =
                         TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
