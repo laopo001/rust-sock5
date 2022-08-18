@@ -4,5 +4,5 @@ quic
 
 ```   
        tcp           udp(quic)             tcp 
-sock5 <-> localhost ==========> -> server <-> target
+sock5 <-> localhost <==========>  server <-> target
 ```
