@@ -2,7 +2,9 @@ use futures_util::stream::StreamExt;
 use std::net::ToSocketAddrs;
 mod certificate;
 use anyhow::{anyhow, bail, Context, Result};
-use quinn::{Endpoint, EndpointConfig, Incoming, ServerConfig};
+use dns_lookup::{lookup_addr, lookup_host};
+use quinn::{Endpoint, EndpointConfig, Incoming, IncomingBiStreams, ServerConfig};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::{
     ascii, fs, io,
     net::SocketAddr,
@@ -10,6 +12,7 @@ use std::{
     str,
     sync::Arc,
 };
+use tokio::net::TcpStream;
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
 
@@ -57,11 +60,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
+    let addr = conn.remote_address();
     let quinn::NewConnection {
         connection,
         mut bi_streams,
         ..
     } = conn.await?;
+
     let span = info_span!(
         "connection",
         remote = %connection.remote_address(),
@@ -76,8 +81,10 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
         info!("established");
 
         // Each stream initiated by the client constitutes a new request.
+
+        // println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
         while let Some(stream) = bi_streams.next().await {
-            let stream = match stream {
+            let mut stream = match stream {
                 Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
                     info!("connection closed");
                     return Ok(());
@@ -87,12 +94,15 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                 }
                 Ok(s) => s,
             };
-            let fut = handle_request(stream);
+
             tokio::spawn(
                 async move {
-                    if let Err(e) = fut.await {
-                        error!("failed: {reason}", reason = e.to_string());
-                    }
+                    let (ip, port, host) = resolve_up_ip_port(&mut stream).await.expect("error");
+                    info!("{} => {}:{} ip_type:{}", addr, &ip, &port, &host);
+                    let mut real_stream =
+                        TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
+
+                    copy(&mut real_stream, &mut stream).await.unwrap();
                 }
                 .instrument(info_span!("request")),
             );
@@ -104,29 +114,107 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
     Ok(())
 }
 
-async fn handle_request((mut send, recv): (quinn::SendStream, quinn::RecvStream)) -> Result<()> {
-    let req = recv
-        .read_to_end(64 * 1024)
-        .await
-        .map_err(|e| anyhow!("failed reading request: {}", e))?;
-    let mut escaped = String::new();
-    for &x in &req[..] {
-        let part = ascii::escape_default(x).collect::<Vec<_>>();
-        escaped.push_str(str::from_utf8(&part).unwrap());
+// async fn handle_request((mut send,mut recv): (quinn::SendStream, quinn::RecvStream)) -> Result<()> {
+//     let req = recv
+//         .read_to_end(64 * 1024)
+//         .await
+//         .map_err(|e| anyhow!("failed reading request: {}", e))?;
+//     let mut escaped = String::new();
+//     for &x in &req[..] {
+//         let part = ascii::escape_default(x).collect::<Vec<_>>();
+//         escaped.push_str(str::from_utf8(&part).unwrap());
+//     }
+//     // dbg!(&escaped);
+//     info!(content = %escaped);
+//     let resp = b"hello world\n".to_vec();
+//     // Write the response
+//     send.write_all(&resp)
+//         .await
+//         .map_err(|e| anyhow!("failed to send response: {}", e))?;
+//     // Gracefully terminate the stream
+//     send.finish()
+//         .await
+//         .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
+//     info!("complete");
+//     Ok(())
+// }
+
+pub async fn resolve_up_ip_port(
+    (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
+) -> Result<(String, String, String)> {
+    let mut buf = [0; 1024];
+    let n = recv.read(&mut buf[..]).await?.expect("tes");
+    let buffer = buf[0..n].to_vec();
+    if buffer[0] != 5 {
+        return Err(anyhow!("只支持sock5"));
     }
-    // dbg!(&escaped);
-    info!(content = %escaped);
-    let resp = b"hello world\n".to_vec();
-    // Write the response
-    send.write_all(&resp)
-        .await
-        .map_err(|e| anyhow!("failed to send response: {}", e))?;
-    // Gracefully terminate the stream
-    send.finish()
-        .await
-        .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
-    info!("complete");
-    Ok(())
+    if buffer[1] == 2 {
+        return Err(anyhow!("只支持TCP UDP"));
+    }
+    let tcp = buffer[1] == 1;
+    let attr_type = buffer[3];
+    // IPv4地址 4字节长度
+    if attr_type == 1 {
+        // eprintln!("IP代理");
+        let ip = &buffer[4..4 + 4];
+        let port_arr = &buffer[8..8 + 2];
+        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+
+        let mut b = buffer.clone();
+        b[1] = 0;
+        send.write(b.as_slice()).await?;
+
+        let s = IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])).to_string();
+
+        Ok((s, port.to_string(), "ipv4".to_string()))
+    } else if attr_type == 3 {
+        // 域名
+        // eprintln!("域名代理");
+        let len = buffer[4] as usize;
+        let hostname = String::from_utf8(Vec::from(&buffer[5..(5 + len)])).unwrap();
+
+        let port_arr = &buffer[5 + len..5 + len + 2];
+        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+        let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str()).unwrap();
+        let mut b = buffer.clone();
+        b[1] = 0;
+        send.write(b.as_slice()).await?;
+        // connect(ip[0], port);
+        let s = ip[0].to_string();
+        Ok((s, port.to_string(), hostname))
+    } else if attr_type == 4 {
+        // IPv6地址 16个字节长度
+        let ip = unsafe { std::mem::transmute::<&[u8], [u8; 16]>(&buffer[4..20]) };
+        let port_arr = &buffer[20..20 + 2];
+        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
+
+        let mut b = buffer.clone();
+        b[1] = 0;
+        send.write(b.as_slice()).await?;
+
+        let s = IpAddr::V6(Ipv6Addr::from(ip)).to_string();
+
+        Ok((s, port.to_string(), "ipv6".to_string()))
+    } else {
+        unimplemented!()
+    }
 }
 
+pub async fn copy(
+    real_stream: &mut TcpStream,
+    (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
+) -> Result<()> {
+    let (mut r, mut w) = tokio::io::split(real_stream);
 
+    // let mut buf = [0; 1024];
+    // let n = recv.read(&mut buf[..]).await?.expect("tes");
+    // let buffer = buf[0..n].to_vec();
+    // info!("{}", String::from_utf8(buffer).unwrap());
+
+    tokio::select! {
+       Ok(_) = tokio::io::copy(recv, &mut w) => {},
+       Ok(_) = tokio::io::copy(&mut r,  send) => {}
+    }
+
+    return Ok(());
+}

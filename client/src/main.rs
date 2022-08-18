@@ -127,14 +127,15 @@ async fn create_conn(origin_stream: &mut TcpStream) -> Result<()> {
     let quinn::NewConnection {
         connection: conn, ..
     } = new_conn;
+    
     let (mut send, mut recv) = conn
         .open_bi()
         .await
         .map_err(|e| anyhow!("failed to open stream: {}", e))?;
 
     tokio::select! {
-       _ = tokio::io::copy(&mut r, &mut send) => {},
-       _ = tokio::io::copy(&mut recv, &mut w) => {},
+       Ok(_) = tokio::io::copy(&mut r, &mut send) => {},
+       Ok(_) = tokio::io::copy(&mut recv, &mut w) => {},
     }
     // tokio::io::copy(&mut r, &mut send);
     // tokio::io::copy(recv, w);
