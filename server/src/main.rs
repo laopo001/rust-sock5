@@ -4,6 +4,7 @@ mod certificate;
 use anyhow::{anyhow, bail, Context, Result};
 use dns_lookup::{lookup_addr, lookup_host};
 use quinn::{Endpoint, EndpointConfig, Incoming, IncomingBiStreams, ServerConfig};
+use rustls::{Certificate, PrivateKey};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::{
     ascii, fs, io,
@@ -15,11 +16,25 @@ use std::{
 use tokio::net::TcpStream;
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
+use clap::Parser;
+
 
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
 
+/// 服务端
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// 请输入端口
+    /// 请输入服务端ip:port
+    #[clap(short, long, value_parser, default_value = "0.0.0.0:12345")]
+    server: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    dbg!(&args);
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
             // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -30,9 +45,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .finish(),
     )
     .unwrap();
-    let certs = certificate::load_certificates("../certificate/cer")?;
-    let key = certificate::load_private_key("../certificate/key")?;
-    let listen = "127.0.0.1:12345".to_socket_addrs()?.next().unwrap();
+
+    // let certs = certificate::load_certificates("../certificate/cer")?;
+    // let key = certificate::load_private_key("../certificate/key")?;
+    let certs = vec![Certificate(
+        include_bytes!("../../certificate/cer").to_vec(),
+    )];
+    let key = PrivateKey(include_bytes!("../../certificate/key").to_vec());
+    let listen = args.server.to_socket_addrs()?.next().unwrap();
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()
@@ -51,7 +71,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let fut = handle_connection(conn);
         tokio::spawn(async move {
             if let Err(e) = fut.await {
-                error!("connection failed: handle_connection {reason}", reason = e.to_string())
+                error!(
+                    "connection failed: handle_connection {reason}",
+                    reason = e.to_string()
+                )
             }
         });
     }
@@ -97,8 +120,9 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
 
             tokio::spawn(
                 async move {
-                    let (ip, port, host) = resolve_up_ip_port(&mut stream).await.expect("解析ip失败");
-                    info!("remote: {}:{} host:{}",  &ip, &port, &host);
+                    let (ip, port, host) =
+                        resolve_up_ip_port(&mut stream).await.expect("解析ip失败");
+                    info!("remote: {}:{} host:{}", &ip, &port, &host);
                     let mut real_stream =
                         TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
 

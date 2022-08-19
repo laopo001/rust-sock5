@@ -22,9 +22,9 @@ await Promise.all([p1, p2])
 
 await $`rm -rf bin`
 await $`mkdir bin`
-if (os.platform() == "windows") {
-    await $`cp ./target/release/client ./bin/client-${os.platform()}.exe`
-    await $`cp ./target/release/server ./bin/server-${os.platform()}.exe`
+if (os.platform() == "win32") {
+    await $`cp ./target/release/client.exe ./bin/client-windows.exe`
+    await $`cp ./target/release/server.exe ./bin/server-windows.exe`
 } else {
     await $`cp ./target/release/client ./bin/client-${os.platform()}`
     await $`cp ./target/release/server ./bin/server-${os.platform()}`

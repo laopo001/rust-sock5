@@ -11,9 +11,9 @@ use std::{
 use tracing::{error, info};
 use url::Url;
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
+use clap::Parser;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-
 struct SkipServerVerification;
 
 impl SkipServerVerification {
@@ -36,8 +36,21 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
     }
 }
 
+/// 客户端
+#[derive(Parser, Debug, Clone)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// 请输入服务端ip:port
+    #[clap(short, long, value_parser, default_value = "127.0.0.1:12345")]
+    server: String,
+    #[clap(short, long, value_parser, default_value_t = 1080)]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    dbg!(&args);
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
             // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -49,14 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
 
-    let listener = TcpListener::bind("0.0.0.0:1080").await?;
-    let mut conn = create_conn().await.unwrap();
+    let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
+    let mut conn = create_conn(args.server.clone()).await.unwrap();
     loop {
         let (mut socket, _) = listener.accept().await?;
-        // let mut splitStream = conn
-        //     .open_bi()
-        //     .await
-        //     .map_err(|e| anyhow!("failed to open stream: {}", e))?;
 
         match conn
             .open_bi()
@@ -71,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(err) => {
                 error!("error: {}, 重新创建连接", err);
-                conn = create_conn().await.unwrap();
+                conn = create_conn(args.server.clone()).await.unwrap();
                 let mut splitStream = conn
                     .open_bi()
                     .await
@@ -79,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tokio::spawn(async move {
                     authenticate(&mut socket).await.unwrap();
                     create_stream(&mut splitStream, &mut socket).await.unwrap();
-                });   
+                });
             }
         }
     }
@@ -127,9 +136,10 @@ async fn authenticate(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-async fn create_conn() -> Result<Connection> {
+async fn create_conn(server: String) -> Result<Connection> {
     let mut roots = rustls::RootCertStore::empty();
-    roots.add(&rustls::Certificate(fs::read(&"../certificate/cer")?))?;
+    let mut vec = include_bytes!("../../certificate/cer").to_vec();
+    roots.add(&rustls::Certificate(vec))?;
     let mut client_crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_root_certificates(roots)
@@ -150,7 +160,7 @@ async fn create_conn() -> Result<Connection> {
 
     let start = Instant::now();
     let host = "localhost";
-    let remote = "127.0.0.1:12345".parse()?;
+    let remote = server.parse().expect("server 参数出错，请输入ip:port");
     info!("connecting to {} at {}", host, remote);
     let new_conn = endpoint
         .connect(remote, host)?
