@@ -80,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(err) => {
                 error!("error: {}, 重新创建连接", err);
+                conn.close(0u32.into(), b"done");
                 conn = create_conn(args.server.clone()).await.expect("create_conn 创建失败");
                 let mut splitStream = conn
                     .open_bi()
@@ -185,6 +186,9 @@ async fn create_stream(
         },
         Err(e) = tokio::io::copy(&mut r,  send) => {
          error!("tokio::io::copy err: {}",e)
+        }
+        else => {
+            error!("tokio::io::copy else")
         }
      }
     // tokio::io::copy(&mut r, &mut send);

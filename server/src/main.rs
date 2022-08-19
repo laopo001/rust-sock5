@@ -124,15 +124,15 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             }
             tokio::spawn(
                 async move {
-                
                     let (ip, port, host) = res.expect("解析ip失败");
                     info!("remote: {}:{} host:{}", &ip, &port, &host);
-                    let mut real_stream =
-                        TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
-
-                    copy(&mut real_stream, &mut stream)
-                        .await
-                        .expect("copy error");
+                    if let mut real_stream = TcpStream::connect(ip + ":" + port.as_str()).await {
+                        copy(&mut real_stream, &mut stream)
+                            .await
+                            .expect("copy error");
+                    } else {
+                        stream.0.finish().await.expect("close stream");
+                    }
                 }
                 .instrument(info_span!("request")),
             );
@@ -219,6 +219,9 @@ pub async fn copy(
        Err(e) = tokio::io::copy(&mut r,  send) => {
         error!("tokio::io::copy err: {}",e)
        }
+       else => {
+        error!("tokio::io::copy else")
+        }
     }
 
     return Ok(());
