@@ -36,4 +36,4 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build binary
-        run: npx zx ../build.mjs
+        run: npx zx ./build.mjs
