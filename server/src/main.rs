@@ -1,12 +1,10 @@
-use futures_util::stream::StreamExt;
-use tokio::io::AsyncWriteExt;
-use std::net::ToSocketAddrs;
-mod certificate;
 use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use dns_lookup::{lookup_addr, lookup_host};
+use futures_util::stream::StreamExt;
 use quinn::{Endpoint, EndpointConfig, Incoming, IncomingBiStreams, ServerConfig};
 use rustls::{Certificate, PrivateKey};
+use std::net::ToSocketAddrs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::{
     ascii, fs, io,
@@ -15,6 +13,7 @@ use std::{
     str,
     sync::Arc,
 };
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
@@ -100,24 +99,14 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             .protocol
             .map_or_else(|| "<none>".into(), |x| String::from_utf8_lossy(&x).into_owned())
     );
-    async {
-        info!("established");
 
-        // Each stream initiated by the client constitutes a new request.
+    info!("established");
 
-        // println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
-        while let Some(stream) = bi_streams.next().await {
-            let mut stream = match stream {
-                Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
-                    info!("connection closed");
-                    return Ok(());
-                }
-                Err(e) => {
-                    error!("connection #error {}", e);
-                    return Err(e);
-                }
-                Ok(s) => s,
-            };
+    // Each stream initiated by the client constitutes a new request.
+
+    // println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
+    while let Some(stream) = bi_streams.next().await {
+        if let Ok(mut stream) = stream {
             let res = resolve_up_ip_port(&mut stream).await;
             if res.is_err() {
                 stream.0.shutdown().await.unwrap_or_default();
@@ -127,21 +116,33 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                 async move {
                     let (ip, port, host) = res.expect("解析ip失败");
                     info!("remote: {}:{} host:{}", &ip, &port, &host);
-                    if let Ok(mut real_stream) = TcpStream::connect(ip + ":" + port.as_str()).await {
-                        copy(&mut real_stream, &mut stream)
-                            .await
-                            .expect("copy error");
+                    if let Ok(mut real_stream) = TcpStream::connect(ip + ":" + port.as_str()).await
+                    {
+                        copy(&mut real_stream, &mut stream).await.unwrap_or_default()
                     } else {
                         stream.0.shutdown().await.unwrap_or_default();
                     }
                 }
                 .instrument(info_span!("request")),
             );
+        } else {
+            continue;
         }
-        Ok(())
+        // let mut stream = match stream {
+        //     Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
+        //         info!("connection closed");
+        //         continue;
+        //         // return Ok(());
+        //     }
+        //     Err(e) => {
+        //         error!("connection #error {}", e);
+        //         continue;
+        //         // return Err(e);
+        //     }
+        //     Ok(s) => s,
+        // };
     }
-    .instrument(span)
-    .await?;
+
     Ok(())
 }
 
@@ -213,19 +214,18 @@ pub async fn copy(
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(real_stream);
 
-    tokio::select! {
-        Err(e) = tokio::io::copy(recv, &mut w) => {
-             error!("tokio::io::copy err: {}",e);
-             w.shutdown().await.expect("w close stream");
-        },
-        Err(e) = tokio::io::copy(&mut r,  send) => {
-             error!("tokio::io::copy err: {}",e);
-             send.shutdown().await.expect("send close stream");
-        }
-        else => {
-            error!("tokio::io::copy else")
-        }
-     }
-
+    let r = tokio::select! {
+       r1 = tokio::io::copy(recv, &mut w) => {
+           r1
+       },
+       r2 = tokio::io::copy(&mut r,  send) => {
+           r2
+       }
+       else => {
+           error!("tokio::io::copy else");
+           Ok(0)
+       }
+    };
+    r.map(drop)?;
     return Ok(());
 }

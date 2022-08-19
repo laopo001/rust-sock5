@@ -66,36 +66,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut conn = create_conn(args.server.clone()).await.unwrap();
     loop {
         let (mut socket, _) = listener.accept().await?;
-
-        match conn
+        info!("coming");
+        if let Ok(mut quic_stream) = conn
             .open_bi()
             .await
             .map_err(|e| anyhow!("failed to open stream: {}", e))
         {
-            Ok(mut splitStream) => {
-                tokio::spawn(async move {
-                    authenticate(&mut socket).await.unwrap();
-                    create_stream(&mut splitStream, &mut socket).await.unwrap();
-                });
-            }
-            Err(err) => {
-                error!("error: {}, 重新创建连接", err);
-                conn.close(0u32.into(), b"done");
-                conn = create_conn(args.server.clone())
-                    .await
-                    .expect("create_conn 创建失败");
-                let mut splitStream = conn
-                    .open_bi()
-                    .await
-                    .map_err(|e| anyhow!("failed to open stream: {}", e))?;
-                tokio::spawn(async move {
-                    authenticate(&mut socket).await.unwrap();
-                    create_stream(&mut splitStream, &mut socket)
-                        .await
-                        .expect("create_conn 创建失败");
-                });
+            authenticate(&mut socket).await.unwrap();
+            if let Err(e) = create_stream(&mut quic_stream, &mut socket).await {
+                error!("create_stream err {}", e)
             }
         }
+        // match conn
+        //     .open_bi()
+        //     .await
+        //     .map_err(|e| anyhow!("failed to open stream: {}", e))
+        // {
+        //     Ok(mut splitStream) => {
+        //         tokio::spawn(async move {
+        //             authenticate(&mut socket).await.unwrap();
+        //             if let Err(e) = create_stream(&mut splitStream, &mut socket).await {
+        //                 error!("create_stream err {}", e)
+        //             }
+        //         });
+        //     }
+        //     Err(err) => {
+        //         error!("error: {}", err);
+        //         panic!("应该是服务器挂了")
+        //         // error!("error: {}, 重新创建连接", err);
+        //         // conn.close(0u32.into(), b"done");
+        //         // conn = create_conn(args.server.clone())
+        //         //     .await
+        //         //     .expect("create_conn 创建失败");
+        //         // let mut splitStream = conn
+        //         //     .open_bi()
+        //         //     .await
+        //         //     .map_err(|e| anyhow!("failed to open stream: {}", e))?;
+        //         // tokio::spawn(async move {
+        //         //     authenticate(&mut socket).await.unwrap();
+        //         //     create_stream(&mut splitStream, &mut socket)
+        //         //         .await
+        //         //         .expect("create_conn 创建失败");
+        //         // });
+        //     }
+        // }
     }
 
     Ok(())
@@ -154,7 +168,7 @@ async fn create_conn(server: String) -> Result<Connection> {
     let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())?;
     let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
 
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(10000);
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(100 * 1000);
     let mut transport_config = quinn::TransportConfig::default();
     transport_config
         .max_idle_timeout(Some(IDLE_TIMEOUT.try_into().unwrap()))
@@ -184,20 +198,18 @@ async fn create_stream(
     origin_stream: &mut TcpStream,
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(origin_stream);
-    tokio::select! {
-       Err(e) = tokio::io::copy(recv, &mut w) => {
-            error!("tokio::io::copy err: {}",e);
-            w.shutdown().await.expect("w close stream");
+    let r = tokio::select! {
+       r1 = tokio::io::copy(recv, &mut w) => {
+           r1
        },
-       Err(e) = tokio::io::copy(&mut r,  send) => {
-            error!("tokio::io::copy err: {}",e);
-            send.shutdown().await.expect("send close stream");
+       r2 = tokio::io::copy(&mut r,  send) => {
+           r2
        }
        else => {
-           error!("tokio::io::copy else")
+           error!("tokio::io::copy else");
+           Ok(0)
        }
-    }
-    // tokio::io::copy(&mut r, &mut send);
-    // tokio::io::copy(recv, w);
+    };
+    r.map(drop)?;
     return Ok(());
 }
