@@ -32,8 +32,8 @@ if (os.platform() == "win32") {
 
 
 
-if (os.platform() == "win32") {
-    await $`7z a ${argv.filename}.7z bin/* -r -mx=9`
-} else {
-    await $`zip -r ${argv.filename}.zip bin`
-}
+// if (os.platform() == "win32") {
+//     await $`7z a ${argv.filename}.7z bin/* -r -mx=9`
+// } else {
+//     await $`zip -r ${argv.filename}.zip bin`
+// }
