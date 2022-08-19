@@ -1,4 +1,5 @@
 use futures_util::stream::StreamExt;
+use tokio::io::AsyncWriteExt;
 use std::net::ToSocketAddrs;
 mod certificate;
 use anyhow::{anyhow, bail, Context, Result};
@@ -213,16 +214,18 @@ pub async fn copy(
     let (mut r, mut w) = tokio::io::split(real_stream);
 
     tokio::select! {
-       Err(e) = tokio::io::copy(recv, &mut w) => {
-        error!("tokio::io::copy err: {}",e)
-       },
-       Err(e) = tokio::io::copy(&mut r,  send) => {
-        error!("tokio::io::copy err: {}",e)
-       }
-       else => {
-        error!("tokio::io::copy else")
+        Err(e) = tokio::io::copy(recv, &mut w) => {
+             error!("tokio::io::copy err: {}",e);
+             w.shutdown().await.expect("w close stream");
+        },
+        Err(e) = tokio::io::copy(&mut r,  send) => {
+             error!("tokio::io::copy err: {}",e);
+             send.shutdown().await.expect("send close stream");
         }
-    }
+        else => {
+            error!("tokio::io::copy else")
+        }
+     }
 
     return Ok(());
 }
