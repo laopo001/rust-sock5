@@ -36,29 +36,4 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build binary
-        run: cargo build --verbose --examples --release --target ${{ matrix.target }}
-        env:
-          RUST_BACKTRACE: 1
-
-      - name: Strip binary (linux and macos)
-        if: matrix.build == 'linux' || matrix.build == 'macos'
-        run: strip "target/${{ matrix.target }}/release/examples/client" && strip "target/${{ matrix.target }}/release/examples/server"
-
-      - name: Build archive
-        shell: bash
-        run: |
-          mkdir bin
-          cd bin
-          if [ "${{ matrix.build }}" = "windows" ]; then
-            cp "../target/${{ matrix.target }}/release/examples/client.exe" ./client-${{ matrix.target }}.exe
-            cp "../target/${{ matrix.target }}/release/examples/server.exe" ./server-${{ matrix.target }}.exe
-          else
-            cp "../target/${{ matrix.target }}/release/examples/client" ./client-${{ matrix.target }}
-            cp "../target/${{ matrix.target }}/release/examples/server" ./server-${{ matrix.target }}
-          fi
-      - name: Publish Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            bin/*
+        run: npx zx ../build.mjs
