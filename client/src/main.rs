@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use futures_util::TryFutureExt;
 use quinn::{Connection, NewConnection};
 use std::{
     fs,
@@ -63,55 +64,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
-    let mut conn = create_conn(args.server.clone()).await.unwrap();
+    let conn = create_conn(args.server.clone()).await.unwrap();
     loop {
         let (mut socket, _) = listener.accept().await?;
-        info!("coming");
-        if let Ok(mut quic_stream) = conn
+        match conn
             .open_bi()
             .await
             .map_err(|e| anyhow!("failed to open stream: {}", e))
         {
-            authenticate(&mut socket).await.unwrap();
-            if let Err(e) = create_stream(&mut quic_stream, &mut socket).await {
-                error!("create_stream err {}", e)
+            Ok(mut quic_stream) => {
+      
+                {
+                    tokio::spawn(async move {
+                        authenticate(&mut socket).await.unwrap();
+                        if let Err(e) = create_stream(&mut quic_stream, &mut socket).await {
+                            error!("create_stream err {}", e)
+                        }
+                    });
+                }
+            }
+            Err(err) => {
+                error!("{}", err);
+                socket.shutdown().await.unwrap_or_default();
+                break;
             }
         }
-        // match conn
-        //     .open_bi()
-        //     .await
-        //     .map_err(|e| anyhow!("failed to open stream: {}", e))
-        // {
-        //     Ok(mut splitStream) => {
-        //         tokio::spawn(async move {
-        //             authenticate(&mut socket).await.unwrap();
-        //             if let Err(e) = create_stream(&mut splitStream, &mut socket).await {
-        //                 error!("create_stream err {}", e)
-        //             }
-        //         });
-        //     }
-        //     Err(err) => {
-        //         error!("error: {}", err);
-        //         panic!("应该是服务器挂了")
-        //         // error!("error: {}, 重新创建连接", err);
-        //         // conn.close(0u32.into(), b"done");
-        //         // conn = create_conn(args.server.clone())
-        //         //     .await
-        //         //     .expect("create_conn 创建失败");
-        //         // let mut splitStream = conn
-        //         //     .open_bi()
-        //         //     .await
-        //         //     .map_err(|e| anyhow!("failed to open stream: {}", e))?;
-        //         // tokio::spawn(async move {
-        //         //     authenticate(&mut socket).await.unwrap();
-        //         //     create_stream(&mut splitStream, &mut socket)
-        //         //         .await
-        //         //         .expect("create_conn 创建失败");
-        //         // });
-        //     }
-        // }
     }
-
     Ok(())
 }
 

@@ -65,8 +65,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, listen)?;
     eprintln!("listening on {}", endpoint.local_addr()?);
 
+
     while let Some(conn) = incoming.next().await {
         info!("connection incoming");
+        let span = info_span!(
+            "connection",
+            remote = %conn.remote_address(),
+        );
         let fut = handle_connection(conn);
         tokio::spawn(async move {
             if let Err(e) = fut.await {
@@ -75,72 +80,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     reason = e.to_string()
                 )
             }
-        });
+        }.instrument(span));
     }
 
     return Ok(());
 }
 
 async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
-    let addr = conn.remote_address();
     let quinn::NewConnection {
         connection,
         mut bi_streams,
         ..
     } = conn.await?;
 
-    let span = info_span!(
-        "connection",
-        remote = %connection.remote_address(),
-        protocol = %connection
-            .handshake_data()
-            .unwrap()
-            .downcast::<quinn::crypto::rustls::HandshakeData>().unwrap()
-            .protocol
-            .map_or_else(|| "<none>".into(), |x| String::from_utf8_lossy(&x).into_owned())
-    );
-
-    info!("established");
-
-    // Each stream initiated by the client constitutes a new request.
-
-    // println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
     while let Some(stream) = bi_streams.next().await {
-        if let Ok(mut stream) = stream {
-            let res = resolve_up_ip_port(&mut stream).await;
-            if res.is_err() {
-                stream.0.shutdown().await.unwrap_or_default();
-                continue;
+        match stream {
+            Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
+                info!("connection closed");
+                break;
             }
-            tokio::spawn(
-                async move {
-                    let (ip, port, host) = res.expect("解析ip失败");
-                    info!("remote: {}:{} host:{}", &ip, &port, &host);
-                    if let Ok(mut real_stream) = TcpStream::connect(ip + ":" + port.as_str()).await
-                    {
-                        copy(&mut real_stream, &mut stream).await.unwrap_or_default()
-                    } else {
-                        stream.0.shutdown().await.unwrap_or_default();
-                    }
+            Err(e) => {
+                error!("connection error {}", e);
+                break;
+            }
+            Ok(mut stream) => {
+                if let Ok((ip, port, host)) = resolve_up_ip_port(&mut stream).await {
+                    tokio::spawn(
+                        async move {
+                            info!("remote: {}:{} host:{}", &ip, &port, &host);
+                            if let Ok(mut real_stream) =
+                                TcpStream::connect(ip + ":" + port.as_str()).await
+                            {
+                                copy(&mut real_stream, &mut stream)
+                                    .await
+                                    .unwrap_or_default()
+                            } else {
+                                stream.0.shutdown().await.unwrap_or_default();
+                            }
+                        }
+                        .instrument(info_span!("request")),
+                    );
+                } else {
+                    error!("{}", "解析ip失败");
+                    stream.0.shutdown().await.unwrap_or_default();
+                    continue;
                 }
-                .instrument(info_span!("request")),
-            );
-        } else {
-            continue;
-        }
-        // let mut stream = match stream {
-        //     Err(quinn::ConnectionError::ApplicationClosed { .. }) => {
-        //         info!("connection closed");
-        //         continue;
-        //         // return Ok(());
-        //     }
-        //     Err(e) => {
-        //         error!("connection #error {}", e);
-        //         continue;
-        //         // return Err(e);
-        //     }
-        //     Ok(s) => s,
-        // };
+            }
+        };
     }
 
     Ok(())
