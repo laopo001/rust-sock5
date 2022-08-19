@@ -151,7 +151,7 @@ async fn create_conn(server: String) -> Result<Connection> {
         .with_no_client_auth();
     client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
-    let mut endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap())?;
+    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())?;
     let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
 
     const IDLE_TIMEOUT: Duration = Duration::from_millis(10000);
