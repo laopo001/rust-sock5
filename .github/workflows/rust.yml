@@ -49,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v1
         with:
           name: ${{ matrix.build }}
-          path: ${{ matrix.build }}.zip ${{ matrix.build }}.7z
+          path: ${{ matrix.build }}.*
