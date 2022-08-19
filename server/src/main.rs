@@ -119,6 +119,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             };
             let res = resolve_up_ip_port(&mut stream).await;
             if res.is_err() {
+                stream.0.finish().await.expect("close stream");
                 continue;
             }
             tokio::spawn(
