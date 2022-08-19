@@ -80,14 +80,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(err) => {
                 error!("error: {}, 重新创建连接", err);
-                conn = create_conn(args.server.clone()).await.unwrap();
+                conn = create_conn(args.server.clone()).await.expect("create_conn 创建失败");
                 let mut splitStream = conn
                     .open_bi()
                     .await
                     .map_err(|e| anyhow!("failed to open stream: {}", e))?;
                 tokio::spawn(async move {
                     authenticate(&mut socket).await.unwrap();
-                    create_stream(&mut splitStream, &mut socket).await.unwrap();
+                    create_stream(&mut splitStream, &mut socket).await.expect("create_conn 创建失败");
                 });
             }
         }
@@ -180,9 +180,13 @@ async fn create_stream(
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(origin_stream);
     tokio::select! {
-        Ok(_) = tokio::io::copy(recv, &mut w) => {},
-        Ok(_) = tokio::io::copy(&mut r,  send) => {}
-    }
+        Err(e) = tokio::io::copy(recv, &mut w) => {
+         error!("tokio::io::copy err: {}",e)
+        },
+        Err(e) = tokio::io::copy(&mut r,  send) => {
+         error!("tokio::io::copy err: {}",e)
+        }
+     }
     // tokio::io::copy(&mut r, &mut send);
     // tokio::io::copy(recv, w);
     return Ok(());

@@ -2,6 +2,7 @@ use futures_util::stream::StreamExt;
 use std::net::ToSocketAddrs;
 mod certificate;
 use anyhow::{anyhow, bail, Context, Result};
+use clap::Parser;
 use dns_lookup::{lookup_addr, lookup_host};
 use quinn::{Endpoint, EndpointConfig, Incoming, IncomingBiStreams, ServerConfig};
 use rustls::{Certificate, PrivateKey};
@@ -16,8 +17,6 @@ use std::{
 use tokio::net::TcpStream;
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
-use clap::Parser;
-
 
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
 
@@ -104,7 +103,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
         info!("established");
 
         // Each stream initiated by the client constitutes a new request.
-
+        
         // println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
         while let Some(stream) = bi_streams.next().await {
             let mut stream = match stream {
@@ -126,7 +125,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                     let mut real_stream =
                         TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
 
-                    copy(&mut real_stream, &mut stream).await.unwrap();
+                    copy(&mut real_stream, &mut stream).await.expect("copy error");
                 }
                 .instrument(info_span!("request")),
             );
@@ -174,7 +173,8 @@ pub async fn resolve_up_ip_port(
 
         let port_arr = &buffer[5 + len..5 + len + 2];
         let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
-        let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str()).unwrap();
+        let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str())
+            .map_err(|err| anyhow!("hostname: {} , {}", hostname, err))?;
         let mut b = buffer.clone();
         b[1] = 0;
         send.write(b.as_slice()).await?;
@@ -206,8 +206,12 @@ pub async fn copy(
     let (mut r, mut w) = tokio::io::split(real_stream);
 
     tokio::select! {
-       Ok(_) = tokio::io::copy(recv, &mut w) => {},
-       Ok(_) = tokio::io::copy(&mut r,  send) => {}
+       Err(e) = tokio::io::copy(recv, &mut w) => {
+        error!("tokio::io::copy err: {}",e)
+       },
+       Err(e) = tokio::io::copy(&mut r,  send) => {
+        error!("tokio::io::copy err: {}",e)
+       }
     }
 
     return Ok(());

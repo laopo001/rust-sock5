@@ -37,10 +37,21 @@ jobs:
 
       - name: Build binary
         run: npx zx ./build.mjs
-        
+
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             bin/*
+
+      - name: Build zip
+        shell: bash
+        run: | 
+          zip -r ${{ matrix.target }}.zip bin
+          
+      - name: Upload archive
+        uses: actions/upload-artifact@v1
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ matrix.target }}.zip
