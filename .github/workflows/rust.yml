@@ -45,16 +45,8 @@ jobs:
           files: |
             bin/*
 
-      - name: Build zip
-        shell: bash
-        run: | 
-          if [ "${{ matrix.build }}" = "windows" ]; then
-            7z a ${{ matrix.build }}.7z bin/* -r -mx=9
-          else
-            zip -r ${{ matrix.build }}.zip bin
-          
       - name: Upload archive
         uses: actions/upload-artifact@v1
         with:
           name: ${{ matrix.build }}
-          path: ${{ matrix.build }}.zip
+          path: ${{ matrix.build }}.zip ${{ matrix.build }}.7z

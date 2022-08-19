@@ -29,3 +29,11 @@ if (os.platform() == "win32") {
     await $`cp ./target/release/client ./bin/client-${argv.filename}`
     await $`cp ./target/release/server ./bin/server-${argv.filename}`
 }
+
+
+
+if (os.platform() == "win32") {
+    await $`7z a ${argv.filename}.7z bin/* -r -mx=9`
+} else {
+    await $`zip -r ${argv.filename}.zip bin`
+}
