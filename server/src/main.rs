@@ -112,17 +112,18 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                     return Ok(());
                 }
                 Err(e) => {
+                    error!("connection #error {}", e);
                     return Err(e);
                 }
                 Ok(s) => s,
             };
-
+            let res = resolve_up_ip_port(&mut stream).await;
+            if res.is_err() {
+                continue;
+            }
             tokio::spawn(
                 async move {
-                    let res = resolve_up_ip_port(&mut stream).await;
-                    if res.is_err() {
-                        return;
-                    }
+                
                     let (ip, port, host) = res.expect("解析ip失败");
                     info!("remote: {}:{} host:{}", &ip, &port, &host);
                     let mut real_stream =
