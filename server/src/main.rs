@@ -120,7 +120,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             };
             let res = resolve_up_ip_port(&mut stream).await;
             if res.is_err() {
-                stream.0.finish().await.expect("close stream");
+                stream.0.shutdown().await.expect("close stream");
                 continue;
             }
             tokio::spawn(
@@ -132,7 +132,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                             .await
                             .expect("copy error");
                     } else {
-                        stream.0.finish().await.expect("close stream");
+                        stream.0.shutdown().await.expect("close stream");
                     }
                 }
                 .instrument(info_span!("request")),
