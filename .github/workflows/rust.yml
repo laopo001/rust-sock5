@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: | 
           if [ "${{ matrix.build }}" = "windows" ]; then
-            7z a ${{ matrix.build }.7z bin/* -r -mx=9
+            7z a ${{ matrix.build }}.7z bin/* -r -mx=9
           else
             zip -r ${{ matrix.build }}.zip bin
           
