@@ -103,7 +103,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
         info!("established");
 
         // Each stream initiated by the client constitutes a new request.
-        
+
         // println!("{} => {}:{} host:{}", addr, &ip, &port, &host);
         while let Some(stream) = bi_streams.next().await {
             let mut stream = match stream {
@@ -119,13 +119,18 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
 
             tokio::spawn(
                 async move {
-                    let (ip, port, host) =
-                        resolve_up_ip_port(&mut stream).await.expect("解析ip失败");
+                    let res = resolve_up_ip_port(&mut stream).await;
+                    if res.is_err() {
+                        return;
+                    }
+                    let (ip, port, host) = res.expect("解析ip失败");
                     info!("remote: {}:{} host:{}", &ip, &port, &host);
                     let mut real_stream =
                         TcpStream::connect(ip + ":" + port.as_str()).await.unwrap();
 
-                    copy(&mut real_stream, &mut stream).await.expect("copy error");
+                    copy(&mut real_stream, &mut stream)
+                        .await
+                        .expect("copy error");
                 }
                 .instrument(info_span!("request")),
             );
