@@ -2,10 +2,10 @@
 
 
 // console.log(argv.target) 
-await within(async () => {
-    cd('certificate')
-    await $`cargo run --verbose`
-})
+// await within(async () => {
+//     cd('certificate')
+//     await $`cargo run --verbose`
+// })
 
 let p1 = within(async () => {
     cd('client')
