@@ -36,7 +36,7 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build binary
-        run: npx zx ./build.mjs
+        run: npx zx ./build.mjs --filename ${{ matrix.build }}
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
@@ -48,10 +48,13 @@ jobs:
       - name: Build zip
         shell: bash
         run: | 
-          zip -r ${{ matrix.target }}.zip bin
+          if [ "${{ matrix.build }}" = "windows" ]; then
+            7z a ${{ matrix.build }.7z bin/* -r -mx=9
+          else
+            zip -r ${{ matrix.build }}.zip bin
           
       - name: Upload archive
         uses: actions/upload-artifact@v1
         with:
-          name: ${{ matrix.target }}
-          path: ${{ matrix.target }}.zip
+          name: ${{ matrix.build }}
+          path: ${{ matrix.build }}.zip
