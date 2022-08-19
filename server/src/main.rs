@@ -126,7 +126,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                 async move {
                     let (ip, port, host) = res.expect("解析ip失败");
                     info!("remote: {}:{} host:{}", &ip, &port, &host);
-                    if let mut real_stream = TcpStream::connect(ip + ":" + port.as_str()).await {
+                    if let Ok(mut real_stream) = TcpStream::connect(ip + ":" + port.as_str()).await {
                         copy(&mut real_stream, &mut stream)
                             .await
                             .expect("copy error");
