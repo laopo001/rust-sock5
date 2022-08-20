@@ -65,7 +65,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, listen)?;
     eprintln!("listening on {}", endpoint.local_addr()?);
 
-
     while let Some(conn) = incoming.next().await {
         info!("connection incoming");
         let span = info_span!(
@@ -73,14 +72,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             remote = %conn.remote_address(),
         );
         let fut = handle_connection(conn);
-        tokio::spawn(async move {
-            if let Err(e) = fut.await {
-                error!(
-                    "connection failed: handle_connection {reason}",
-                    reason = e.to_string()
-                )
+        tokio::spawn(
+            async move {
+                if let Err(e) = fut.await {
+                    error!(
+                        "connection failed: handle_connection {reason}",
+                        reason = e.to_string()
+                    )
+                }
             }
-        }.instrument(span));
+            .instrument(span),
+        );
     }
 
     return Ok(());
@@ -104,26 +106,30 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                 break;
             }
             Ok(mut stream) => {
-                if let Ok((ip, port, host)) = resolve_up_ip_port(&mut stream).await {
-                    tokio::spawn(
-                        async move {
-                            info!("remote: {}:{} host:{}", &ip, &port, &host);
-                            if let Ok(mut real_stream) =
-                                TcpStream::connect(ip + ":" + port.as_str()).await
-                            {
-                                copy(&mut real_stream, &mut stream)
-                                    .await
-                                    .unwrap_or_default()
-                            } else {
-                                stream.0.shutdown().await.unwrap_or_default();
+                match resolve_up_ip_port(&mut stream).await {
+                    Ok((ip, port, host)) =>{
+                        tokio::spawn(
+                            async move {
+                                info!("remote: {}:{} host:{}", &ip, &port, &host);
+                                if let Ok(mut real_stream) =
+                                    TcpStream::connect(ip.clone() + ":" + port.as_str()).await
+                                {
+                                    copy(&mut real_stream, &mut stream)
+                                        .await
+                                        .unwrap_or_default()
+                                } else {
+                                    error!("fail remote connect: {}:{} host:{}", &ip, &port, &host);
+                                    // stream.0.finish().await.unwrap_or_default();
+                                }
                             }
-                        }
-                        .instrument(info_span!("request")),
-                    );
-                } else {
-                    error!("{}", "解析ip失败");
-                    stream.0.shutdown().await.unwrap_or_default();
-                    continue;
+                            .instrument(info_span!("request")),
+                        );  
+                    }
+                    Err(err)=>{
+                        error!("解析ip失败 {}", err);
+                        // stream.0.finish().await.unwrap_or_default();
+                        continue;
+                    }
                 }
             }
         };
@@ -136,7 +142,10 @@ pub async fn resolve_up_ip_port(
     (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
 ) -> Result<(String, String, String)> {
     let mut buf = [0; 1024];
-    let n = recv.read(&mut buf[..]).await?.expect("test");
+    let n = recv.read(&mut buf[..]).await?.unwrap_or(0);
+    if (n == 0) {
+        return Err(anyhow!("resolve_up_ip_port read fail"));
+    }
     let buffer = buf[0..n].to_vec();
     if buffer[0] != 5 {
         return Err(anyhow!("只支持sock5"));

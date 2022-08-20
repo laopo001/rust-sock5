@@ -64,28 +64,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
-    let conn = create_conn(args.server.clone()).await.unwrap();
+
+
+    let mut roots = rustls::RootCertStore::empty();
+    let mut vec = include_bytes!("../../certificate/cer").to_vec();
+    roots.add(&rustls::Certificate(vec))?;
+    let mut client_crypto = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
+
+    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())?;
+    let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
+
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(100 * 1000);
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config
+        .max_idle_timeout(Some(IDLE_TIMEOUT.try_into().unwrap()))
+        .keep_alive_interval(Some(Duration::from_millis(100)));
+    client_config.transport = Arc::new(transport_config);
+
+    endpoint.set_default_client_config(client_config);
+
+    let start = Instant::now();
+    let host = "localhost";
+    let args = Args::parse();
+    let remote = args.server.parse().expect("server 参数出错，请输入ip:port");
+    info!("connecting to {} at {}", host, remote);
+    let new_conn = endpoint
+        .connect(remote, host)?
+        .await.expect("fail create conn");
+    info!("connected at {:?}", start.elapsed());
+    let quinn::NewConnection {
+        connection: conn, ..
+    } = new_conn;
+
     loop {
         let (mut socket, _) = listener.accept().await?;
+        info!("accepted");
         match conn
             .open_bi()
             .await
             .map_err(|e| anyhow!("failed to open stream: {}", e))
         {
             Ok(mut quic_stream) => {
-      
-                {
-                    tokio::spawn(async move {
-                        authenticate(&mut socket).await.unwrap();
-                        if let Err(e) = create_stream(&mut quic_stream, &mut socket).await {
-                            error!("create_stream err {}", e)
-                        }
-                    });
-                }
+                tokio::spawn(async move {
+                    authenticate(&mut socket).await.unwrap();
+                    if let Err(e) = create_stream(&mut quic_stream, &mut socket).await {
+                        error!("stream err {}", e);
+                        return;
+                    }
+                });
             }
-            Err(err) => {
-                error!("{}", err);
-                socket.shutdown().await.unwrap_or_default();
+            Err(e) => {
+                error!("failed open_bi stream: {}", e);
+                socket.shutdown().await?;
+                conn.close(0u32.into(), b"done");
+                endpoint.wait_idle().await;
                 break;
             }
         }
@@ -133,43 +169,7 @@ async fn authenticate(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-async fn create_conn(server: String) -> Result<Connection> {
-    let mut roots = rustls::RootCertStore::empty();
-    let mut vec = include_bytes!("../../certificate/cer").to_vec();
-    roots.add(&rustls::Certificate(vec))?;
-    let mut client_crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
-    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())?;
-    let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
-
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(100 * 1000);
-    let mut transport_config = quinn::TransportConfig::default();
-    transport_config
-        .max_idle_timeout(Some(IDLE_TIMEOUT.try_into().unwrap()))
-        .keep_alive_interval(Some(Duration::from_millis(100)));
-    client_config.transport = Arc::new(transport_config);
-
-    endpoint.set_default_client_config(client_config);
-
-    let start = Instant::now();
-    let host = "localhost";
-    let remote = server.parse().expect("server 参数出错，请输入ip:port");
-    info!("connecting to {} at {}", host, remote);
-    let new_conn = endpoint
-        .connect(remote, host)?
-        .await
-        .map_err(|e| anyhow!("failed to connect: {}", e))?;
-    info!("connected at {:?}", start.elapsed());
-    let quinn::NewConnection {
-        connection: conn, ..
-    } = new_conn;
-
-    return Ok(conn);
-}
 
 async fn create_stream(
     (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
