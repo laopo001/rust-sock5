@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{SocketAddrV4, SocketAddrV6};
 
+pub struct Command(pub u8, pub u64);
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct Command(pub u8);
+pub struct CommandSocketAddrV4(pub SocketAddrV4);
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct CommandIpv4Addr(pub Ipv4Addr);
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct CommandIpv6Addr(pub Ipv6Addr);
+pub struct CommandSocketAddrV6(pub SocketAddrV6);

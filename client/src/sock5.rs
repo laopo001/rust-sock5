@@ -1,13 +1,14 @@
 use anyhow::{anyhow, Result};
-use tracing::{error, info};
+use tracing::info;
 
 use dns_lookup::lookup_host;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 pub async fn authenticate(stream: &mut TcpStream) -> Result<()> {
-    let mut buffer = [0; 128];
+    let mut buffer = [0; 1024];
     let n = stream.read(&mut buffer[..]).await?;
     if buffer[0] != 5 {
         return Err(anyhow!("只支持sock5"));
@@ -42,9 +43,9 @@ pub async fn authenticate(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-pub async fn resolve_up_ip_port(stream: &mut TcpStream) -> Result<IpAddr> {
+pub async fn resolve_up_ip_port(stream: &mut TcpStream) -> Result<SocketAddr> {
     let mut buf = [0; 1024];
-    let n = stream.read(&mut buf[..]).await.unwrap();
+    let n = stream.read(&mut buf[..]).await?;
     if n == 0 {
         return Err(anyhow!("resolve_up_ip_port read fail"));
     }
@@ -67,8 +68,12 @@ pub async fn resolve_up_ip_port(stream: &mut TcpStream) -> Result<IpAddr> {
         let mut b = buffer.clone();
         b[1] = 0;
         stream.write(b.as_slice()).await?;
-        info!("host ipv4: {:?}", b);
-        Ok(IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])))
+        let res = SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]),
+            _port,
+        ));
+        info!("addr ipv4: {:?}", res.to_string());
+        Ok(res)
     } else if attr_type == 3 {
         // 域名
         // eprintln!("域名代理");
@@ -77,13 +82,23 @@ pub async fn resolve_up_ip_port(stream: &mut TcpStream) -> Result<IpAddr> {
 
         let port_arr = &buffer[5 + len..5 + len + 2];
         let _port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
-        let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str())
+        let ip: Vec<IpAddr> = lookup_host(hostname.as_str())
             .map_err(|err| anyhow!("hostname: {} , {}", hostname, err))?;
         let mut b = buffer.clone();
         b[1] = 0;
         stream.write(b.as_slice()).await?;
-        info!("host: {:?} ipv6: {:?}", hostname, b);
-        Ok(ip[0])
+        match ip[0] {
+            IpAddr::V4(i4) => {
+                let res = SocketAddr::V4(SocketAddrV4::new(i4, _port));
+                info!("host: {} addr ipv4: {:?}", &hostname, res.to_string());
+                Ok(res)
+            }
+            IpAddr::V6(i6) => {
+                let res = SocketAddr::V6(SocketAddrV6::new(i6, _port, 0, 0));
+                info!("host: {} addr ipv6: {:?}", &hostname, res.to_string());
+                Ok(res)
+            }
+        }
     } else if attr_type == 4 {
         // IPv6地址 16个字节长度
         let ip = unsafe { std::mem::transmute::<&[u8], [u8; 16]>(&buffer[4..20]) };
@@ -93,8 +108,9 @@ pub async fn resolve_up_ip_port(stream: &mut TcpStream) -> Result<IpAddr> {
         let mut b = buffer.clone();
         b[1] = 0;
         stream.write(b.as_slice()).await?;
-        info!("host ipv6: {:?}", b);
-        Ok(IpAddr::V6(Ipv6Addr::from(ip)))
+        let res = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::from(ip), _port, 0, 0));
+        info!("addr ipv6: {:?}", res.to_string());
+        Ok(res)
     } else {
         unimplemented!()
     }

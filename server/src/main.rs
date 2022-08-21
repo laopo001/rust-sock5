@@ -1,11 +1,12 @@
 use anyhow::Result;
 
 use clap::Parser;
-
 use futures_util::stream::StreamExt;
 
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 use rustls::{Certificate, PrivateKey};
-use std::net::IpAddr;
+use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
 
@@ -101,27 +102,23 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             }
             Ok(mut stream) => {
                 match resolve_up_ip_port(&mut stream).await {
-                    Ok(ip) => {
+                    Ok(addr) => {
                         tokio::spawn(
                             async move {
-                                info!("remote host:{}", &ip.to_string());
-                                if let Ok(mut real_stream) =
-                                    TcpStream::connect(ip.to_string()).await
-                                {
-                                    copy(&mut real_stream, &mut stream)
-                                        .await
-                                        .unwrap_or_default()
+                                if let Ok(mut real_stream) = TcpStream::connect(addr).await {
+                                    info!("remote host:{}", &addr.to_string());
+                                    copy(&mut real_stream, &mut stream).await.unwrap()
                                 } else {
-                                    error!("remote host:{}", &ip.to_string());
-                                    // stream.0.finish().await.unwrap_or_default();
+                                    error!("remote host:{}", &addr.to_string());
+                                    // stream.0.finish().await.unwrap();
                                 }
                             }
-                            .instrument(info_span!("request")),
+                            .instrument(info_span!("request copy")),
                         );
                     }
                     Err(err) => {
                         error!("解析ip失败 {}", err);
-                        // stream.0.finish().await.unwrap_or_default();
+                        // stream.0.finish().await.unwrap();
                         continue;
                     }
                 }
@@ -134,23 +131,22 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
 
 pub async fn resolve_up_ip_port(
     (_send, recv): &mut (quinn::SendStream, quinn::RecvStream),
-) -> Result<IpAddr> {
-    let mut buf = [0; 1];
-    let n = recv.read(&mut buf[..]).await?.unwrap();
-    let buffer = buf[0..n].to_vec();
+) -> Result<SocketAddr> {
+    let mut buffer = [0; 9];
+    recv.read_exact(&mut buffer[..]).await?;
+
+    let len = u64::from_ne_bytes(buffer[1..9].try_into().unwrap()) as usize;
 
     if buffer[0] == 1 {
-        let len = std::mem::size_of::<common::CommandIpv4Addr>();
         let mut buf = vec![0; len];
         recv.read_exact(&mut buf[..]).await?;
-        let ip4: common::CommandIpv4Addr = bincode::deserialize(&buf[..]).unwrap();
-        Ok(IpAddr::V4(ip4.0))
+        let ip4: common::CommandSocketAddrV4 = bincode::deserialize_from(&buf[..]).unwrap();
+        Ok(SocketAddr::V4(ip4.0))
     } else if buffer[0] == 2 {
-        let len = std::mem::size_of::<common::CommandIpv6Addr>();
         let mut buf = vec![0; len];
         recv.read_exact(&mut buf[..]).await?;
-        let ip6: common::CommandIpv6Addr = bincode::deserialize(&buf[..]).unwrap();
-        Ok(IpAddr::V6(ip6.0))
+        let ip6: common::CommandSocketAddrV6 = bincode::deserialize(&buf[..]).unwrap();
+        Ok(SocketAddr::V6(ip6.0))
     } else {
         unimplemented!()
     }
@@ -162,17 +158,29 @@ pub async fn copy(
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(real_stream);
 
-    select! {
-       r1 = tokio::io::copy(recv, &mut w) => {
-           r1
-       },
-       r2 = tokio::io::copy(&mut r,  send) => {
-           r2
-       }
-       else => {
-           error!("tokio::io::copy else");
-           Ok(0)
-       }
+    // let mut buffer = [0; 1024];
+    // let mut take = recv.take(1024);
+    // let n = take.read(&mut buffer).await?;
+    // let str = String::from_utf8(Vec::from(&buffer[..n])).unwrap();
+    // info!(str);
+
+    // // w.write(&buffer[..n]).await?;
+    // let mut buffer = [0; 1024];
+    // let n = r.read(&mut buffer).await?;
+    // let str = String::from_utf8(Vec::from(&buffer[..n])).unwrap();
+    // info!(str);
+
+    let client_to_server = async {
+        tokio::io::copy(recv, &mut w).await?;
+        w.shutdown().await
     };
+
+    let server_to_client = async {
+        tokio::io::copy(&mut r, send).await?;
+        send.shutdown().await
+    };
+
+    tokio::try_join!(client_to_server, server_to_client)?;
+
     Ok(())
 }
