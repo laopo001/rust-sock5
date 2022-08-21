@@ -1,21 +1,16 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::Result;
+
 use clap::Parser;
-use dns_lookup::{lookup_addr, lookup_host};
+
 use futures_util::stream::StreamExt;
-use quinn::{Endpoint, EndpointConfig, Incoming, IncomingBiStreams, ServerConfig};
+
 use rustls::{Certificate, PrivateKey};
-use tokio::select;
+use std::net::IpAddr;
 use std::net::ToSocketAddrs;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::{
-    ascii, fs, io,
-    net::SocketAddr,
-    path::{self, Path, PathBuf},
-    str,
-    sync::Arc,
-};
-use tokio::io::AsyncWriteExt;
+use std::sync::Arc;
+
 use tokio::net::TcpStream;
+use tokio::select;
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
 
@@ -48,10 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // let certs = certificate::load_certificates("../certificate/cer")?;
     // let key = certificate::load_private_key("../certificate/key")?;
-    let certs = vec![Certificate(
-        include_bytes!("../../certificate/cer").to_vec(),
-    )];
-    let key = PrivateKey(include_bytes!("../../certificate/key").to_vec());
+    let certs = vec![Certificate(include_bytes!("../../common/cer").to_vec())];
+    let key = PrivateKey(include_bytes!("../../common/key").to_vec());
     let listen = args.server.to_socket_addrs()?.next().unwrap();
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_safe_defaults()
@@ -86,12 +79,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    return Ok(());
+    Ok(())
 }
 
 async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
     let quinn::NewConnection {
-        connection,
+        connection: _,
         mut bi_streams,
         ..
     } = conn.await?;
@@ -108,18 +101,18 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             }
             Ok(mut stream) => {
                 match resolve_up_ip_port(&mut stream).await {
-                    Ok((ip, port, host)) => {
+                    Ok(ip) => {
                         tokio::spawn(
                             async move {
-                                info!("remote: {}:{} host:{}", &ip, &port, &host);
+                                info!("remote host:{}", &ip.to_string());
                                 if let Ok(mut real_stream) =
-                                    TcpStream::connect(ip.clone() + ":" + port.as_str()).await
+                                    TcpStream::connect(ip.to_string()).await
                                 {
                                     copy(&mut real_stream, &mut stream)
                                         .await
                                         .unwrap_or_default()
                                 } else {
-                                    error!("fail remote connect: {}:{} host:{}", &ip, &port, &host);
+                                    error!("remote host:{}", &ip.to_string());
                                     // stream.0.finish().await.unwrap_or_default();
                                 }
                             }
@@ -140,65 +133,24 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
 }
 
 pub async fn resolve_up_ip_port(
-    (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
-) -> Result<(String, String, String)> {
-    let mut buf = [0; 1024];
-    let n = recv.read(&mut buf[..]).await?.unwrap_or(0);
-    if n == 0 {
-        return Err(anyhow!("resolve_up_ip_port read fail"));
-    }
+    (_send, recv): &mut (quinn::SendStream, quinn::RecvStream),
+) -> Result<IpAddr> {
+    let mut buf = [0; 1];
+    let n = recv.read(&mut buf[..]).await?.unwrap();
     let buffer = buf[0..n].to_vec();
-    if buffer[0] != 5 {
-        return Err(anyhow!("只支持sock5"));
-    }
-    if buffer[1] == 2 {
-        return Err(anyhow!("只支持TCP UDP"));
-    }
-    let tcp = buffer[1] == 1;
-    let attr_type = buffer[3];
-    // IPv4地址 4字节长度
-    if attr_type == 1 {
-        // eprintln!("IP代理");
-        let ip = &buffer[4..4 + 4];
-        let port_arr = &buffer[8..8 + 2];
-        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
 
-        let mut b = buffer.clone();
-        b[1] = 0;
-        send.write(b.as_slice()).await?;
-
-        let s = IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])).to_string();
-
-        Ok((s, port.to_string(), "ipv4".to_string()))
-    } else if attr_type == 3 {
-        // 域名
-        // eprintln!("域名代理");
-        let len = buffer[4] as usize;
-        let hostname = String::from_utf8(Vec::from(&buffer[5..(5 + len)])).unwrap();
-
-        let port_arr = &buffer[5 + len..5 + len + 2];
-        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
-        let ip: Vec<std::net::IpAddr> = lookup_host(hostname.as_str())
-            .map_err(|err| anyhow!("hostname: {} , {}", hostname, err))?;
-        let mut b = buffer.clone();
-        b[1] = 0;
-        send.write(b.as_slice()).await?;
-        // connect(ip[0], port);
-        let s = ip[0].to_string();
-        Ok((s, port.to_string(), hostname))
-    } else if attr_type == 4 {
-        // IPv6地址 16个字节长度
-        let ip = unsafe { std::mem::transmute::<&[u8], [u8; 16]>(&buffer[4..20]) };
-        let port_arr = &buffer[20..20 + 2];
-        let port = port_arr[0] as u16 * 256 + port_arr[1] as u16;
-
-        let mut b = buffer.clone();
-        b[1] = 0;
-        send.write(b.as_slice()).await?;
-
-        let s = IpAddr::V6(Ipv6Addr::from(ip)).to_string();
-
-        Ok((s, port.to_string(), "ipv6".to_string()))
+    if buffer[0] == 1 {
+        let len = std::mem::size_of::<common::CommandIpv4Addr>();
+        let mut buf = vec![0; len];
+        recv.read_exact(&mut buf[..]).await?;
+        let ip4: common::CommandIpv4Addr = bincode::deserialize(&buf[..]).unwrap();
+        Ok(IpAddr::V4(ip4.0))
+    } else if buffer[0] == 2 {
+        let len = std::mem::size_of::<common::CommandIpv6Addr>();
+        let mut buf = vec![0; len];
+        recv.read_exact(&mut buf[..]).await?;
+        let ip6: common::CommandIpv6Addr = bincode::deserialize(&buf[..]).unwrap();
+        Ok(IpAddr::V6(ip6.0))
     } else {
         unimplemented!()
     }
@@ -222,5 +174,5 @@ pub async fn copy(
            Ok(0)
        }
     };
-    return Ok(());
+    Ok(())
 }

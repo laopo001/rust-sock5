@@ -1,13 +1,11 @@
 use anyhow::{anyhow, Result};
 use std::{
-    fs,
     io::{self, Write},
     net::ToSocketAddrs,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::{error, info};
+
 use url::Url;
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"h3"];
 

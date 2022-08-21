@@ -1,20 +1,16 @@
+mod sock5;
 use anyhow::{anyhow, Result};
-use futures_util::TryFutureExt;
-use quinn::{Connection, NewConnection};
+use std::net::IpAddr;
 use std::{
-    fs,
-    io::{self, Write},
-    net::ToSocketAddrs,
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{error, info};
-use url::Url;
+
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
 use clap::Parser;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, select};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::select;
 struct SkipServerVerification;
 
 impl SkipServerVerification {
@@ -66,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
 
     let mut roots = rustls::RootCertStore::empty();
-    let mut vec = include_bytes!("../../certificate/cer").to_vec();
+    let vec = include_bytes!("../../common/cer").to_vec();
     roots.add(&rustls::Certificate(vec))?;
     let mut client_crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
@@ -110,10 +106,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             Ok(mut quic_stream) => {
                 tokio::spawn(async move {
-                    authenticate(&mut socket).await.unwrap();
+                    sock5::authenticate(&mut socket).await.unwrap();
+                    match sock5::resolve_up_ip_port(&mut socket).await.unwrap() {
+                        IpAddr::V4(ip4) => {
+                            quic_stream
+                                .0
+                                .write(&bincode::serialize(&common::Command(1)).unwrap())
+                                .await
+                                .unwrap();
+                            quic_stream
+                                .0
+                                .write(&bincode::serialize(&common::CommandIpv4Addr(ip4)).unwrap())
+                                .await
+                                .unwrap();
+                        }
+                        IpAddr::V6(ip6) => {
+                            quic_stream
+                                .0
+                                .write(&bincode::serialize(&common::Command(2)).unwrap())
+                                .await
+                                .unwrap();
+                            quic_stream
+                                .0
+                                .write(&bincode::serialize(&common::CommandIpv6Addr(ip6)).unwrap())
+                                .await
+                                .unwrap();
+                        }
+                    }
                     if let Err(e) = create_stream(&mut quic_stream, &mut socket).await {
                         error!("stream err {}", e);
-                        return;
                     }
                 });
             }
@@ -133,42 +154,6 @@ fn duration_secs(x: &Duration) -> f32 {
     x.as_secs() as f32 + x.subsec_nanos() as f32 * 1e-9
 }
 
-async fn authenticate(stream: &mut TcpStream) -> Result<()> {
-    let mut buffer = [0; 128];
-    let n = stream.read(&mut buffer[..]).await?;
-    if buffer[0] != 5 {
-        return Err(anyhow!("只支持sock5"));
-    }
-    let methods = buffer[2..n].to_vec();
-    if methods.contains(&0) {
-        stream.write(&[5, 0]).await?;
-        return Ok(());
-    } else if methods.contains(&2) {
-        stream.write(&[5, 2]).await?;
-        let mut buffer = [0; 1024];
-        let n = stream.read(&mut buffer[..]).await?;
-        if buffer[0] != 1 {
-            return Err(anyhow!("子协商的当前版本是1"));
-        }
-        let ulen = buffer[1] as usize;
-        let username = String::from_utf8(buffer[2..2 + ulen].into()).unwrap();
-
-        let plen = buffer[2 + ulen] as usize;
-        let pstart = 2 + ulen + 1;
-        let password = String::from_utf8(buffer[pstart..pstart + plen].into()).unwrap();
-        info!("username:{},password:{}", &username, &password);
-        if username == "admin" && password == "123456" {
-            stream.write(&[1, 0]).await?;
-        } else {
-            stream.write(&[1, 1]).await?;
-            return Err(anyhow!("密码错误"));
-        }
-        return Ok(());
-    } else {
-        return Err(anyhow!("不支持的验证"));
-    }
-}
-
 async fn create_stream(
     (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
     origin_stream: &mut TcpStream,
@@ -186,5 +171,5 @@ async fn create_stream(
            Ok(0)
        }
     };
-    return Ok(());
+    Ok(())
 }
