@@ -2,7 +2,7 @@
 members = [
     "client",
     "server",
-    "certificate"
+    "common"
 ]
 
 [profile.release]

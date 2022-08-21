@@ -13,7 +13,7 @@ use tracing::{error, info};
 use url::Url;
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
 use clap::Parser;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, select};
 use tokio::net::{TcpListener, TcpStream};
 struct SkipServerVerification;
 
@@ -65,7 +65,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
 
-
     let mut roots = rustls::RootCertStore::empty();
     let mut vec = include_bytes!("../../certificate/cer").to_vec();
     roots.add(&rustls::Certificate(vec))?;
@@ -94,7 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("connecting to {} at {}", host, remote);
     let new_conn = endpoint
         .connect(remote, host)?
-        .await.expect("fail create conn");
+        .await
+        .expect("fail create conn");
     info!("connected at {:?}", start.elapsed());
     let quinn::NewConnection {
         connection: conn, ..
@@ -119,13 +119,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(e) => {
                 error!("failed open_bi stream: {}", e);
-                socket.shutdown().await?;
-                conn.close(0u32.into(), b"done");
-                endpoint.wait_idle().await;
+                // socket.shutdown().await?;
                 break;
             }
         }
     }
+    conn.close(0u32.into(), b"done");
+    endpoint.wait_idle().await;
     Ok(())
 }
 
@@ -169,14 +169,12 @@ async fn authenticate(stream: &mut TcpStream) -> Result<()> {
     }
 }
 
-
-
 async fn create_stream(
     (send, recv): &mut (quinn::SendStream, quinn::RecvStream),
     origin_stream: &mut TcpStream,
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(origin_stream);
-    let r = tokio::select! {
+    select! {
        r1 = tokio::io::copy(recv, &mut w) => {
            r1
        },
@@ -188,6 +186,5 @@ async fn create_stream(
            Ok(0)
        }
     };
-    r.map(drop)?;
     return Ok(());
 }

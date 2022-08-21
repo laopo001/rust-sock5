@@ -4,6 +4,7 @@ use dns_lookup::{lookup_addr, lookup_host};
 use futures_util::stream::StreamExt;
 use quinn::{Endpoint, EndpointConfig, Incoming, IncomingBiStreams, ServerConfig};
 use rustls::{Certificate, PrivateKey};
+use tokio::select;
 use std::net::ToSocketAddrs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::{
@@ -107,7 +108,7 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
             }
             Ok(mut stream) => {
                 match resolve_up_ip_port(&mut stream).await {
-                    Ok((ip, port, host)) =>{
+                    Ok((ip, port, host)) => {
                         tokio::spawn(
                             async move {
                                 info!("remote: {}:{} host:{}", &ip, &port, &host);
@@ -123,9 +124,9 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                                 }
                             }
                             .instrument(info_span!("request")),
-                        );  
+                        );
                     }
-                    Err(err)=>{
+                    Err(err) => {
                         error!("解析ip失败 {}", err);
                         // stream.0.finish().await.unwrap_or_default();
                         continue;
@@ -143,7 +144,7 @@ pub async fn resolve_up_ip_port(
 ) -> Result<(String, String, String)> {
     let mut buf = [0; 1024];
     let n = recv.read(&mut buf[..]).await?.unwrap_or(0);
-    if (n == 0) {
+    if n == 0 {
         return Err(anyhow!("resolve_up_ip_port read fail"));
     }
     let buffer = buf[0..n].to_vec();
@@ -209,7 +210,7 @@ pub async fn copy(
 ) -> Result<()> {
     let (mut r, mut w) = tokio::io::split(real_stream);
 
-    let r = tokio::select! {
+    select! {
        r1 = tokio::io::copy(recv, &mut w) => {
            r1
        },
@@ -221,6 +222,5 @@ pub async fn copy(
            Ok(0)
        }
     };
-    r.map(drop)?;
     return Ok(());
 }
