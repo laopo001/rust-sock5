@@ -20,8 +20,12 @@ jobs:
       - name: Build binary
         run: npx zx ./build-server-linux.mjs
 
-      - name: Upload archive
-        uses: actions/upload-artifact@v3
+      - name: copy file via ssh password
+        uses: appleboy/scp-action@master
         with:
-          name: server-linux
-          path: bin/server-linux
+            host: 38.47.100.196
+            username: ${{ secrets.USERNAME }}
+            password: ${{ secrets.PASSWORD }}
+            port: 22
+            source: "./bin/server-linux"
+            target: "/root/data/r"
