@@ -106,14 +106,22 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                         tokio::spawn(
                             async move {
                                 if let Ok(mut real_stream) = TcpStream::connect(addr).await {
-                                    info!("remote host:{}", &addr.to_string());
-                                    copy(&mut real_stream, &mut stream).await.unwrap()
+                                    info!("connect success remote host:{}", &addr.to_string());
+                                    match copy(&mut real_stream, &mut stream).await {
+                                        Ok(_) => {
+                                            info!("copy success");
+                                        }
+                                        Err(e) => {
+                                            error!("copy error {}", e);
+                                        }
+                                    }
+                                    // copy(&mut real_stream, &mut stream).await.unwrap()
                                 } else {
-                                    error!("remote host:{}", &addr.to_string());
+                                    error!("connect error remote host:{}", &addr.to_string());
                                     // stream.0.finish().await.unwrap();
                                 }
                             }
-                            .instrument(info_span!("request copy")),
+                            .instrument(info_span!("spawn")),
                         );
                     }
                     Err(err) => {
@@ -140,7 +148,7 @@ pub async fn resolve_up_ip_port(
     if buffer[0] == 1 {
         let mut buf = vec![0; len];
         recv.read_exact(&mut buf[..]).await?;
-        let ip4: common::CommandSocketAddrV4 = bincode::deserialize_from(&buf[..]).unwrap();
+        let ip4: common::CommandSocketAddrV4 = bincode::deserialize(&buf[..]).unwrap();
         Ok(SocketAddr::V4(ip4.0))
     } else if buffer[0] == 2 {
         let mut buf = vec![0; len];

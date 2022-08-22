@@ -1,0 +1,27 @@
+name: build
+on:
+  push:
+    branches: [ "master" ]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          override: true
+          target: x86_64-unknown-linux-musl
+
+
+      - name: Build binary
+        run: npx zx ./build-server-linux.mjs
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v3
+        with:
+          name: server-linux
+          path: bin/server-linux
