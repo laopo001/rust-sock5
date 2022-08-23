@@ -107,7 +107,13 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                             async move {
                                 if let Ok(mut real_stream) = TcpStream::connect(addr).await {
                                     info!("connect success remote host:{}", &addr.to_string());
-                                    match copy(&mut real_stream, &mut stream).await {
+                                    match copy(&mut real_stream, &mut stream)
+                                        .instrument(info_span!(
+                                            "remote host:",
+                                             addr = %addr.to_string()
+                                        ))
+                                        .await
+                                    {
                                         Ok(_) => {
                                             info!("copy success");
                                         }
@@ -179,13 +185,13 @@ pub async fn copy(
     // info!(str);
 
     let client_to_server = async {
-        tokio::io::copy(recv, &mut w).await?;
-        w.shutdown().await
+        tokio::io::copy(recv, &mut w).await
+        // w.shutdown().await
     };
 
     let server_to_client = async {
-        tokio::io::copy(&mut r, send).await?;
-        send.shutdown().await
+        tokio::io::copy(&mut r, send).await
+        // send.shutdown().await
     };
 
     tokio::try_join!(client_to_server, server_to_client)?;

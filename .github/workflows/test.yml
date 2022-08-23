@@ -6,8 +6,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: echo
-        run: echo ${{ secrets.USERNAME }}
       - name: Checkout repository
         uses: actions/checkout@v3
       - name: Install Rust
