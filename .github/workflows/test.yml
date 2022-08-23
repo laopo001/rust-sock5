@@ -1,4 +1,4 @@
-name: build
+name: test
 on:
   push:
     branches: [ "master" ]
@@ -22,9 +22,17 @@ jobs:
       - name: copy file via ssh password
         uses: appleboy/scp-action@master
         with:
-            host: 38.47.100.196
+            host: ${{ secrets.HOST }}
             username: ${{ secrets.USERNAME }}
             password: ${{ secrets.PASSWORD }}
-            port: 22
+            port: ${{ secrets.PORT }}
             source: "./bin/server-linux"
             target: "/root/data/r"
+      - name: executing remote ssh commands using password
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
+          port: ${{ secrets.PORT }}
+          script: pm2 restart r2
