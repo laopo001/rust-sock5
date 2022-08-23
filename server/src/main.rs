@@ -30,6 +30,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    println!("start!!!");
     dbg!(&args);
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
