@@ -192,13 +192,13 @@ async fn stream_copy(
     let (mut r, mut w) = tokio::io::split(origin_stream);
 
     let client_to_server = async {
-        tokio::io::copy(recv, &mut w).await
-        // w.shutdown().await
+        tokio::io::copy(recv, &mut w).await?;
+        w.shutdown().await
     };
 
     let server_to_client = async {
-        tokio::io::copy(&mut r, send).await
-        // send.shutdown().await
+        tokio::io::copy(&mut r, send).await?;
+        send.shutdown().await
     };
 
     tokio::try_join!(client_to_server, server_to_client)?;
