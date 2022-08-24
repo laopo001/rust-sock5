@@ -161,8 +161,10 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "quinn",
  "rcgen",
  "serde",
+ "tokio",
 ]
 
 [[package]]

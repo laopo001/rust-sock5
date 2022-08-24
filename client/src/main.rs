@@ -1,6 +1,6 @@
 mod sock5;
 use anyhow::{anyhow, Result};
-
+use common::BiStream;
 use std::net::SocketAddr;
 use std::{
     sync::Arc,
@@ -121,11 +121,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     quic_stream.0.write(&res).await.unwrap();
                                     quic_stream.0.write(&data).await.unwrap();
 
-                                    if let Err(e) = stream_copy(&mut quic_stream, &mut socket).await
+                                    let mut bistream = BiStream(quic_stream.0, quic_stream.1);
+                                    match tokio::io::copy_bidirectional(&mut socket, &mut bistream)
+                                        .await
                                     {
-                                        error!("stream copy err {}", e);
-                                        return;
+                                        Ok(_) => {
+                                            info!("copy success");
+                                        }
+                                        Err(e) => {
+                                            error!("copy error {}", e);
+                                        }
                                     }
+                                    // if let Err(e) = stream_copy(&mut quic_stream, &mut socket).await
+                                    // {
+                                    //     error!("stream copy err {}", e);
+                                    //     return;
+                                    // }
                                 }
                                 SocketAddr::V6(ip6) => {
                                     let data =
@@ -146,11 +157,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         .unwrap();
                                     quic_stream.0.write(&data).await.unwrap();
 
-                                    if let Err(e) = stream_copy(&mut quic_stream, &mut socket).await
+                                    let mut bistream = BiStream(quic_stream.0, quic_stream.1);
+
+                                    match tokio::io::copy_bidirectional(&mut socket, &mut bistream)
+                                        .await
                                     {
-                                        error!("stream copy err {}", e);
-                                        return;
+                                        Ok(_) => {
+                                            info!("copy success");
+                                        }
+                                        Err(e) => {
+                                            error!("copy error {}", e);
+                                        }
                                     }
+
+                                    // if let Err(e) = stream_copy(&mut quic_stream, &mut socket).await
+                                    // {
+                                    //     error!("stream copy err {}", e);
+                                    //     return;
+                                    // }
                                 }
                             }
                         }

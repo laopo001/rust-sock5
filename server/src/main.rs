@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use clap::Parser;
+use common::BiStream;
 use futures_util::stream::StreamExt;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use rustls::{Certificate, PrivateKey};
@@ -108,12 +108,13 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                             async move {
                                 if let Ok(mut real_stream) = TcpStream::connect(addr).await {
                                     info!("connect success remote host:{}", &addr.to_string());
-                                    match copy(&mut real_stream, &mut stream)
-                                        .instrument(info_span!(
-                                            "remote host:",
-                                             addr = %addr.to_string()
-                                        ))
-                                        .await
+                                    let mut bistream = BiStream(stream.0, stream.1);
+
+                                    match tokio::io::copy_bidirectional(
+                                        &mut real_stream,
+                                        &mut bistream,
+                                    )
+                                    .await
                                     {
                                         Ok(_) => {
                                             info!("copy success");
@@ -122,7 +123,6 @@ async fn handle_connection(conn: quinn::Connecting) -> Result<()> {
                                             error!("copy error {}", e);
                                         }
                                     }
-                                    // copy(&mut real_stream, &mut stream).await.unwrap()
                                 } else {
                                     error!("connect error remote host:{}", &addr.to_string());
                                     // stream.0.finish().await.unwrap();
