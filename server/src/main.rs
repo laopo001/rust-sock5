@@ -1,5 +1,6 @@
 use anyhow::Result;
-
+use git_version::git_version;
+const GIT_VERSION: &str = git_version!();
 use clap::Parser;
 use common::BiStream;
 use futures_util::stream::StreamExt;
@@ -29,8 +30,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("start: {} ", GIT_VERSION);
     let args = Args::parse();
-    println!("start!!!");
     dbg!(&args);
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()

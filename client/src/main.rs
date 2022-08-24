@@ -10,9 +10,11 @@ use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
 pub const ALPN_QUIC_HTTP: &[&[u8]] = &[b"hq-29"];
 use clap::Parser;
+use git_version::git_version;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
+const GIT_VERSION: &str = git_version!();
 struct SkipServerVerification;
 
 impl SkipServerVerification {
@@ -48,6 +50,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("start: {} ", GIT_VERSION);
     let args = Args::parse();
     dbg!(&args);
     tracing::subscriber::set_global_default(
