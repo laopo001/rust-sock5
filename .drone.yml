@@ -47,6 +47,7 @@ steps:
       to:
         from_secret: TELEGRAM_TO
       message: >
+        [DRONE CI]: {{ build.status }}: {{ repo.owner }}/{{ repo.name }}
         {{#success build.status}}
           第 {{build.number}} 次构建已完成，状态：构建成功
         {{else}}
