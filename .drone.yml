@@ -6,7 +6,7 @@ steps:
   - name: build
     image: rust
     commands:
-      - cd server && cargo build --release && cp ./target/release/server ./target/release/server-linux
+      - cd server && cargo build --release && cd .. && mv ./target/release/server ./target/release/server-linux
 
   - name: scp files
     image: appleboy/drone-scp
