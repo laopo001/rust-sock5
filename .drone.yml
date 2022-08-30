@@ -24,7 +24,7 @@ steps:
       source:
         - ./server-linux
 
-  - name: commands
+  - name: ssh-reload
     image: appleboy/drone-ssh
     pull: always
     settings:
