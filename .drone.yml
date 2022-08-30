@@ -1,0 +1,55 @@
+kind: pipeline
+type: docker
+name: default
+
+steps:
+  - name: build
+    image: rust
+    commands:
+      - cd server && cargo build --release && cp ./target/release/server ./target/release/server-linux
+
+  - name: scp files
+    image: appleboy/drone-scp
+    settings:
+      host:
+        from_secret: HOST
+      username:
+        from_secret: NAME
+      password:
+        from_secret: PASSWORD
+      port:
+        from_secret: PORT
+      command_timeout: 2m
+      target: /root/server-bin/rust_sock5
+      source:
+        - ./target/release/server-linux
+
+  - name: commands
+    image: appleboy/drone-ssh
+    pull: always
+    settings:
+      host:
+        from_secret: HOST
+      username:
+        from_secret: NAME
+      port:
+        from_secret: PORT
+      password:
+        from_secret: PASSWORD
+      script:
+        - cd /root/server-bin/rust_sock5 && pm2 restart --name rust_sock5 ./server-linux
+
+  - name: send telegram notification
+    image: appleboy/drone-telegram
+    settings:
+      token:
+        from_secret: TELEGRAM_TOKEN
+      to:
+        from_secret: TELEGRAM_TO
+      message: >
+        {{#success build.status}}
+          第 {{build.number}} 次构建已完成，状态：构建成功
+        {{else}}
+          第 {{build.number}} 次构建已完成，状态：构建失败
+        {{/success}}
+        提交记录：{{commit.author}} - {{commit.message}}

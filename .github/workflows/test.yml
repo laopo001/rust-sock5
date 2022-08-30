@@ -1,50 +1,50 @@
-name: test
-on:
-  push:
-    branches: [ "master" ]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          profile: minimal
-          override: true
-          target: x86_64-unknown-linux-musl
+# name: test
+# on:
+#   push:
+#     branches: [ "master" ]
+# jobs:
+#   test:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v3
+#       - name: Install Rust
+#         uses: actions-rs/toolchain@v1
+#         with:
+#           toolchain: nightly
+#           profile: minimal
+#           override: true
+#           target: x86_64-unknown-linux-musl
 
-      - name: Build binary
-        run: npx zx ./build-server-linux.mjs
+#       - name: Build binary
+#         run: npx zx ./build-server-linux.mjs
 
-      - name: copy file via ssh password
-        uses: appleboy/scp-action@master
-        with:
-            host: ${{ secrets.HOST }}
-            username: ${{ secrets.USERNAME }}
-            password: ${{ secrets.PASSWORD }}
-            port: ${{ secrets.PORT }}
-            source: "./bin/server-linux"
-            target: "/root/data/r"
-      - name: executing remote ssh commands using password
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD }}
-          port: ${{ secrets.PORT }}
-          script: pm2 reload r2
-      - name: send telegram message on push
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: |
-            ${{ github.actor }} created commit:
-            Commit message: ${{ github.event.commits[0].message }}
+#       - name: copy file via ssh password
+#         uses: appleboy/scp-action@master
+#         with:
+#             host: ${{ secrets.HOST }}
+#             username: ${{ secrets.USERNAME }}
+#             password: ${{ secrets.PASSWORD }}
+#             port: ${{ secrets.PORT }}
+#             source: "./bin/server-linux"
+#             target: "/root/data/r"
+#       - name: executing remote ssh commands using password
+#         uses: appleboy/ssh-action@master
+#         with:
+#           host: ${{ secrets.HOST }}
+#           username: ${{ secrets.USERNAME }}
+#           password: ${{ secrets.PASSWORD }}
+#           port: ${{ secrets.PORT }}
+#           script: pm2 reload r2
+#       - name: send telegram message on push
+#         uses: appleboy/telegram-action@master
+#         with:
+#           to: ${{ secrets.TELEGRAM_TO }}
+#           token: ${{ secrets.TELEGRAM_TOKEN }}
+#           message: |
+#             ${{ github.actor }} created commit:
+#             Commit message: ${{ github.event.commits[0].message }}
             
-            Repository: ${{ github.repository }}
+#             Repository: ${{ github.repository }}
             
-            See changes: https://github.com/${{ github.repository }}/commit/${{github.sha}}
+#             See changes: https://github.com/${{ github.repository }}/commit/${{github.sha}}
