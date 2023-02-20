@@ -7,6 +7,8 @@
 //     await $`cargo run --verbose`
 // })
 
+argv.filename = argv.filename ? argv.filename : "default"
+
 await within(async () => {
     cd('client')
     await $`cargo build --release`
