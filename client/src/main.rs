@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let host = "localhost";
         let args = Args::parse();
         let remote = args.server.parse().expect("server 参数出错，请输入ip:port");
-        info!("connecting to {} at {}", host, remote);
+        info!("connecting to {} at {}", remote, host);
         let new_conn = endpoint
             .connect(remote, host)?
             .await
