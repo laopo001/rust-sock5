@@ -46,6 +46,8 @@ struct Args {
     server: String,
     #[clap(short, long, value_parser, default_value_t = 1080)]
     port: u16,
+    #[clap(short, long, value_parser, default_value = "quic")]
+    net: String,
 }
 
 #[tokio::main]

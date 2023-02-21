@@ -6,7 +6,7 @@ steps:
   - name: build
     image: rust
     commands:
-      - cd server && cargo build --release && cd .. && mv ./target/release/server ./server-linux
+      - cd server && cargo build --target=x86_64-unknown-linux-musl --release && cd .. && mv ./target/x86_64-unknown-linux-musl/release/server ./server-linux
 
   - name: scp files
     image: appleboy/drone-scp
@@ -20,7 +20,7 @@ steps:
       port:
         from_secret: PORT
       command_timeout: 2m
-      target: /root/server-bin/rust_sock5
+      target: /root/server-linux
       source:
         - ./server-linux
 

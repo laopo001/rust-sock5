@@ -26,6 +26,8 @@ struct Args {
     /// 请输入服务端ip:port
     #[clap(short, long, value_parser, default_value = "0.0.0.0:12345")]
     server: String,
+    #[clap(short, long, value_parser, default_value = "quic")]
+    net: String,
 }
 
 #[tokio::main]
