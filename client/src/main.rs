@@ -184,8 +184,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let (mut socket, _) = listener.accept().await?;
             info!("accepted");
+            let remote: SocketAddr = args.server.parse().expect("server 参数出错，请输入ip:port");
             tokio::spawn(async move {
-                let stream = TcpStream::connect(args.server.parse().unwrap()).await?;
+                let mut stream = TcpStream::connect(remote).await.unwrap();
                 sock5::authenticate(&mut socket).await.unwrap();
                 match sock5::resolve_up_ip_port(&mut socket).await {
                     Ok(socket_add) => match socket_add {

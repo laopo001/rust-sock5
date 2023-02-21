@@ -1,17 +1,17 @@
-use anyhow::Result;
 use git_version::git_version;
 const GIT_VERSION: &str = git_version!();
+use anyhow::{anyhow, Result};
 use clap::Parser;
 use common::BiStream;
 use futures_util::stream::StreamExt;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
 use rustls::{Certificate, PrivateKey};
+use std::any;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::select;
 use tracing::{error, info, info_span};
 use tracing_futures::Instrument as _;
@@ -46,44 +46,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .unwrap();
 
-    // let certs = certificate::load_certificates("../certificate/cer")?;
-    // let key = certificate::load_private_key("../certificate/key")?;
-    let certs = vec![Certificate(include_bytes!("../../common/cer").to_vec())];
-    let key = PrivateKey(include_bytes!("../../common/key").to_vec());
-    let listen = args.server.to_socket_addrs()?.next().unwrap();
-    let mut server_crypto = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)?;
-    server_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
-    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(server_crypto));
-    Arc::get_mut(&mut server_config.transport)
-        .unwrap()
-        .max_concurrent_uni_streams(0_u8.into());
+    if args.net == "quic" {
+        let certs = vec![Certificate(include_bytes!("../../common/cer").to_vec())];
+        let key = PrivateKey(include_bytes!("../../common/key").to_vec());
+        let listen = args.server.to_socket_addrs()?.next().unwrap();
+        let mut server_crypto = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)?;
+        server_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
+        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(server_crypto));
+        Arc::get_mut(&mut server_config.transport)
+            .unwrap()
+            .max_concurrent_uni_streams(0_u8.into());
 
-    let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, listen)?;
-    eprintln!("listening on {}", endpoint.local_addr()?);
+        let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, listen)?;
+        eprintln!("listening on {}", endpoint.local_addr()?);
 
-    while let Some(conn) = incoming.next().await {
-        info!("connection incoming");
-        let span = info_span!(
-            "connection",
-            remote = %conn.remote_address(),
-        );
-        let fut = handle_connection(conn);
-        tokio::spawn(
-            async move {
-                if let Err(e) = fut.await {
-                    error!(
-                        "connection failed: handle_connection {reason}",
-                        reason = e.to_string()
-                    )
+        while let Some(conn) = incoming.next().await {
+            info!("connection incoming");
+            let span = info_span!(
+                "connection",
+                remote = %conn.remote_address(),
+            );
+            let fut = handle_connection(conn);
+            tokio::spawn(
+                async move {
+                    if let Err(e) = fut.await {
+                        error!(
+                            "connection failed: handle_connection {reason}",
+                            reason = e.to_string()
+                        )
+                    }
                 }
-            }
-            .instrument(span),
-        );
-    }
+                .instrument(span),
+            );
+        }
+    } else {
+        let listener = TcpListener::bind(args.server.clone()).await?;
 
+        loop {
+            let (socket, _) = listener.accept().await?;
+            accept(socket, &args).await?;
+        }
+    }
     Ok(())
 }
 
@@ -201,4 +207,60 @@ pub async fn copy(
     tokio::try_join!(client_to_server, server_to_client)?;
 
     Ok(())
+}
+
+// new
+async fn accept(mut stream: TcpStream, args: &Args) -> Result<(), anyhow::Error> {
+    match tcp_resolve_up_ip_port(&mut stream).await {
+        Ok(addr) => {
+            tokio::spawn(
+                async move {
+                    if let Ok(mut real_stream) = TcpStream::connect(addr).await {
+                        info!("connect success remote host:{}", &addr.to_string());
+
+                        match tokio::io::copy_bidirectional(&mut real_stream, &mut stream).await {
+                            Ok(_) => {
+                                info!("copy success");
+                            }
+                            Err(e) => {
+                                error!("copy error {}", e);
+                            }
+                        }
+                    } else {
+                        error!("connect error remote host:{}", &addr.to_string());
+                        // stream.0.finish().await.unwrap();
+                    }
+                }
+                .instrument(info_span!("spawn")),
+            );
+        }
+        Err(err) => {
+            error!("解析ip失败 {}", err);
+            // stream.0.finish().await.unwrap();
+            return Err(err);
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn tcp_resolve_up_ip_port(stream: &mut TcpStream) -> Result<SocketAddr> {
+    let mut buffer = [0; 9];
+    stream.read_exact(&mut buffer[..]).await?;
+
+    let len = u64::from_ne_bytes(buffer[1..9].try_into().unwrap()) as usize;
+
+    if buffer[0] == 1 {
+        let mut buf = vec![0; len];
+        stream.read_exact(&mut buf[..]).await?;
+        let ip4: common::CommandSocketAddrV4 = bincode::deserialize(&buf[..]).unwrap();
+        Ok(SocketAddr::V4(ip4.0))
+    } else if buffer[0] == 2 {
+        let mut buf = vec![0; len];
+        stream.read_exact(&mut buf[..]).await?;
+        let ip6: common::CommandSocketAddrV6 = bincode::deserialize(&buf[..]).unwrap();
+        Ok(SocketAddr::V6(ip6.0))
+    } else {
+        unimplemented!()
+    }
 }
