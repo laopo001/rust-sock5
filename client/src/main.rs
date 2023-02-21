@@ -68,77 +68,136 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind("0.0.0.0:".to_string() + &args.port.to_string()).await?;
 
-    let mut roots = rustls::RootCertStore::empty();
-    let vec = include_bytes!("../../common/cer").to_vec();
-    roots.add(&rustls::Certificate(vec))?;
-    let mut client_crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
+    if args.net == "quic" {
+        let mut roots = rustls::RootCertStore::empty();
+        let vec = include_bytes!("../../common/cer").to_vec();
+        roots.add(&rustls::Certificate(vec))?;
+        let mut client_crypto = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_crypto.alpn_protocols = ALPN_QUIC_HTTP.iter().map(|&x| x.into()).collect();
 
-    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())?;
-    let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
+        let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())?;
+        let mut client_config = quinn::ClientConfig::new(Arc::new(client_crypto));
 
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(100 * 1000);
-    let mut transport_config = quinn::TransportConfig::default();
-    transport_config
-        .max_idle_timeout(Some(IDLE_TIMEOUT.try_into().unwrap()))
-        .keep_alive_interval(Some(Duration::from_millis(100)));
-    client_config.transport = Arc::new(transport_config);
+        const IDLE_TIMEOUT: Duration = Duration::from_millis(100 * 1000);
+        let mut transport_config = quinn::TransportConfig::default();
+        transport_config
+            .max_idle_timeout(Some(IDLE_TIMEOUT.try_into().unwrap()))
+            .keep_alive_interval(Some(Duration::from_millis(100)));
+        client_config.transport = Arc::new(transport_config);
 
-    endpoint.set_default_client_config(client_config);
+        endpoint.set_default_client_config(client_config);
 
-    let start = Instant::now();
-    let host = "localhost";
-    let args = Args::parse();
-    let remote = args.server.parse().expect("server 参数出错，请输入ip:port");
-    info!("connecting to {} at {}", host, remote);
-    let new_conn = endpoint
-        .connect(remote, host)?
-        .await
-        .expect("fail create conn");
-    info!("connected at {:?}", start.elapsed());
-    let quinn::NewConnection {
-        connection: conn, ..
-    } = new_conn;
+        let start = Instant::now();
+        let host = "localhost";
+        let args = Args::parse();
+        let remote = args.server.parse().expect("server 参数出错，请输入ip:port");
+        info!("connecting to {} at {}", host, remote);
+        let new_conn = endpoint
+            .connect(remote, host)?
+            .await
+            .expect("fail create conn");
+        info!("connected at {:?}", start.elapsed());
+        let quinn::NewConnection {
+            connection: conn, ..
+        } = new_conn;
 
-    loop {
-        let (mut socket, _) = listener.accept().await?;
-        info!("accepted");
-        let mut quic_stream_result = conn.open_bi().await;
-        if quic_stream_result.is_err() {
-            quic_stream_result = conn.open_bi().await;
-            warn!("重试第一次");
+        loop {
+            let (mut socket, _) = listener.accept().await?;
+            info!("accepted");
+            let mut quic_stream_result = conn.open_bi().await;
+            if quic_stream_result.is_err() {
+                socket.shutdown().await?;
+                error!("结束");
+                break;
+            }
+            let mut quic_stream = quic_stream_result.unwrap();
+            tokio::spawn(async move {
+                sock5::authenticate(&mut socket).await.unwrap();
+                match sock5::resolve_up_ip_port(&mut socket).await {
+                    Ok(socket_add) => {
+                        match socket_add {
+                            SocketAddr::V4(ip4) => {
+                                let data =
+                                    bincode::serialize(&common::CommandSocketAddrV4(ip4)).unwrap();
+                                let mut res = vec![1];
+                                res.extend((data.len() as u64).to_ne_bytes());
+                                quic_stream.0.write(&res).await.unwrap();
+                                quic_stream.0.write(&data).await.unwrap();
+
+                                let mut bistream = BiStream(quic_stream.0, quic_stream.1);
+                                match tokio::io::copy_bidirectional(&mut socket, &mut bistream)
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        info!("copy success");
+                                    }
+                                    Err(e) => {
+                                        error!("copy error {}", e);
+                                    }
+                                }
+                            }
+                            SocketAddr::V6(ip6) => {
+                                let data =
+                                    bincode::serialize(&common::CommandSocketAddrV6(ip6)).unwrap();
+                                let mut res = vec![2];
+                                res.extend((data.len() as u64).to_ne_bytes());
+
+                                quic_stream
+                                    .0
+                                    .write(
+                                        &bincode::serialize(
+                                            &res, // [&
+                                        )
+                                        .unwrap(),
+                                    )
+                                    .await
+                                    .unwrap();
+                                quic_stream.0.write(&data).await.unwrap();
+
+                                let mut bistream = BiStream(quic_stream.0, quic_stream.1);
+
+                                match tokio::io::copy_bidirectional(&mut socket, &mut bistream)
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        info!("copy success");
+                                    }
+                                    Err(e) => {
+                                        error!("copy error {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("resolve_up_ip_port error: {}", err);
+                    }
+                }
+            });
         }
-        if quic_stream_result.is_err() {
-            quic_stream_result = conn.open_bi().await;
-            info!("重试第二次");
-        }
-        if quic_stream_result.is_err() {
-            quic_stream_result = conn.open_bi().await;
-            info!("重试第三次");
-        }
-        if quic_stream_result.is_err() {
-            socket.shutdown().await?;
-            break;
-        }
-        let mut quic_stream = quic_stream_result.unwrap();
-        tokio::spawn(async move {
-            sock5::authenticate(&mut socket).await.unwrap();
-            match sock5::resolve_up_ip_port(&mut socket).await {
-                Ok(socket_add) => {
-                    match socket_add {
+        conn.close(0u32.into(), b"done");
+        endpoint.wait_idle().await;
+    } else {
+        loop {
+            let (mut socket, _) = listener.accept().await?;
+            info!("accepted");
+            tokio::spawn(async move {
+                let stream = TcpStream::connect(args.server.parse().unwrap()).await?;
+                sock5::authenticate(&mut socket).await.unwrap();
+                match sock5::resolve_up_ip_port(&mut socket).await {
+                    Ok(socket_add) => match socket_add {
                         SocketAddr::V4(ip4) => {
                             let data =
                                 bincode::serialize(&common::CommandSocketAddrV4(ip4)).unwrap();
                             let mut res = vec![1];
                             res.extend((data.len() as u64).to_ne_bytes());
-                            quic_stream.0.write(&res).await.unwrap();
-                            quic_stream.0.write(&data).await.unwrap();
+                            stream.write(&res).await.unwrap();
+                            stream.write(&data).await.unwrap();
 
-                            let mut bistream = BiStream(quic_stream.0, quic_stream.1);
-                            match tokio::io::copy_bidirectional(&mut socket, &mut bistream).await {
+                            match tokio::io::copy_bidirectional(&mut socket, &mut stream).await {
                                 Ok(_) => {
                                     info!("copy success");
                                 }
@@ -146,11 +205,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     error!("copy error {}", e);
                                 }
                             }
-                            // if let Err(e) = stream_copy(&mut quic_stream, &mut socket).await
-                            // {
-                            //     error!("stream copy err {}", e);
-                            //     return;
-                            // }
                         }
                         SocketAddr::V6(ip6) => {
                             let data =
@@ -158,21 +212,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut res = vec![2];
                             res.extend((data.len() as u64).to_ne_bytes());
 
-                            quic_stream
-                                .0
-                                .write(
-                                    &bincode::serialize(
-                                        &res, // [&
-                                    )
-                                    .unwrap(),
-                                )
-                                .await
-                                .unwrap();
-                            quic_stream.0.write(&data).await.unwrap();
+                            stream.write(&res).await.unwrap();
+                            stream.write(&data).await.unwrap();
 
-                            let mut bistream = BiStream(quic_stream.0, quic_stream.1);
-
-                            match tokio::io::copy_bidirectional(&mut socket, &mut bistream).await {
+                            match tokio::io::copy_bidirectional(&mut socket, &mut stream).await {
                                 Ok(_) => {
                                     info!("copy success");
                                 }
@@ -181,16 +224,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+                    },
+                    Err(err) => {
+                        error!("resolve_up_ip_port error: {}", err);
                     }
                 }
-                Err(err) => {
-                    error!("{}", err);
-                }
-            }
-        });
+            });
+        }
     }
-    conn.close(0u32.into(), b"done");
-    endpoint.wait_idle().await;
+
     Ok(())
 }
 
