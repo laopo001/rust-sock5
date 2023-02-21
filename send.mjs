@@ -1,10 +1,10 @@
 await within(async () => {
     cd('server')
-    await $`cargo build --release`
+    await $`cargo build --target=x86_64-unknown-linux-musl --release`
 })
 
-await $`cp ./target/release/server ./bin/server-linux`
+await $`cp ./target/x86_64-unknown-linux-musl/release/server ./bin/server-linux`
 
-await  $`scp  -o ProxyCommand='nc -x 192.168.100.142:7891 %h %p' ./bin/server-linux root@38.47.100.196:/root/data/r`
+await  $`scp ./bin/server-linux root@silk.dadigua.men:/root/`
 
 // ssh -o ProxyCommand='nc -x 192.168.100.142:7891 %h %p' root@dadigua.men
